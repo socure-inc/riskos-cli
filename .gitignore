@@ -1,0 +1,21 @@
+# Compiled binaries
+riskos
+riskos-darwin-arm64
+riskos-darwin-amd64
+riskos-linux-amd64
+riskos-linux-arm64
+riskos-windows-amd64.exe
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Credentials (never commit)
+.env
+.env.*

@@ -1,0 +1,39 @@
+openapi: 3.1.0
+info:
+  title: RiskOS Evaluation API
+  version: 1.0.0
+servers:
+  - url: https://riskos.sandbox.socure.com
+    description: Sandbox
+  - url: https://riskos.socure.com
+    description: Production
+paths:
+  /api/evaluation:
+    post:
+      summary: Create a verification session
+      operationId: createEvaluation
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluationRequest'
+            example:
+              id: "550e8400-e29b-41d4-a716-446655440000"
+              timestamp: "2026-06-04T14:00:00Z"
+              workflow: "consumer_onboarding"
+              data:
+                individual:
+                  id: "cust-abc123"
+                custom:
+                  redirect_uri: "https://your-app.example.com/callback"
+      responses:
+        '201':
+          description: Hosted Flow started
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
