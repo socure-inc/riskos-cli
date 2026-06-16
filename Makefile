@@ -1,6 +1,6 @@
 BINARY  = riskos
 BUILD   = build
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || echo "$(shell git rev-parse --abbrev-ref HEAD)-$(shell git rev-parse --short HEAD)$(shell git diff --quiet || echo '-dirty')")
 LDFLAGS = -ldflags "-s -w -X main.version=$(VERSION)"
 
 .PHONY: build run clean cross test test-short coverage fmt lint vet pre-commit
