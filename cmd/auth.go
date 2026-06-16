@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"riskos/internal/api"
-	"riskos/internal/config"
-	"riskos/internal/ui"
+	"github.com/effectivai/riskos-cli/internal/api"
+	"github.com/effectivai/riskos-cli/internal/config"
+	"github.com/effectivai/riskos-cli/internal/ui"
 )
 
 func buildAuthCmd() *cobra.Command {

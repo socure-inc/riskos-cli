@@ -1,6 +1,6 @@
 package main
 
-import "riskos/cmd"
+import "github.com/effectivai/riskos-cli/cmd"
 
 var version = "dev"
 

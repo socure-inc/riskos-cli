@@ -1,4 +1,4 @@
-module riskos
+module github.com/effectivai/riskos-cli
 
 go 1.24.6
 

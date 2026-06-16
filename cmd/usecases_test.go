@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"riskos/internal/api"
-	"riskos/internal/config"
+	"github.com/effectivai/riskos-cli/internal/api"
+	"github.com/effectivai/riskos-cli/internal/config"
 )
 
 func TestUsecasesList_JSON(t *testing.T) {

@@ -9,8 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zalando/go-keyring"
-	"riskos/internal/api"
-	"riskos/internal/config"
+
+	"github.com/effectivai/riskos-cli/internal/api"
+	"github.com/effectivai/riskos-cli/internal/config"
 )
 
 func init() {

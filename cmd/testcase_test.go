@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"riskos/internal/api"
-	"riskos/internal/config"
-	"riskos/internal/ui"
+	"github.com/effectivai/riskos-cli/internal/api"
+	"github.com/effectivai/riskos-cli/internal/config"
+	"github.com/effectivai/riskos-cli/internal/ui"
 )
 
 func makeAuthStore(t *testing.T) *config.Store {

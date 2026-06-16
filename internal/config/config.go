@@ -16,7 +16,8 @@ import (
 	"os"
 
 	"github.com/zalando/go-keyring"
-	"riskos/internal/debug"
+
+	"github.com/effectivai/riskos-cli/internal/debug"
 )
 
 const (

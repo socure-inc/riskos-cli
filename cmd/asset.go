@@ -10,8 +10,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"riskos/internal/debug"
-	"riskos/internal/ui"
+
+	"github.com/effectivai/riskos-cli/internal/debug"
+	"github.com/effectivai/riskos-cli/internal/ui"
 )
 
 const (

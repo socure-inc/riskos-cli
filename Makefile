@@ -38,7 +38,7 @@ coverage:
 	@echo "Coverage report: $(BUILD)/coverage.html"
 
 fmt:
-	go fmt ./...
+	goimports -local github.com/effectivai/riskos-cli -w .
 
 vet:
 	go vet ./...

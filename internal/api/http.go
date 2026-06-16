@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"riskos/internal/config"
-	"riskos/internal/debug"
+	"github.com/effectivai/riskos-cli/internal/config"
+	"github.com/effectivai/riskos-cli/internal/debug"
 )
 
 const (

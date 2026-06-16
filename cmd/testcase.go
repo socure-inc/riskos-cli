@@ -6,8 +6,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"riskos/internal/api"
-	"riskos/internal/ui"
+
+	"github.com/effectivai/riskos-cli/internal/api"
+	"github.com/effectivai/riskos-cli/internal/ui"
 )
 
 type persona struct {

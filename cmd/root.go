@@ -8,10 +8,11 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"riskos/internal/api"
-	"riskos/internal/config"
-	"riskos/internal/debug"
-	"riskos/internal/ui"
+
+	"github.com/effectivai/riskos-cli/internal/api"
+	"github.com/effectivai/riskos-cli/internal/config"
+	"github.com/effectivai/riskos-cli/internal/debug"
+	"github.com/effectivai/riskos-cli/internal/ui"
 )
 
 var rootCmd = buildRootCmd(DefaultDeps())

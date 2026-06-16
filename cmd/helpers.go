@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"riskos/internal/api"
+	"github.com/effectivai/riskos-cli/internal/api"
 )
 
 // resolveBlueprintForUseCase looks up the blueprint name for a given use case

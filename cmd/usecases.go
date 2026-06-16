@@ -4,7 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"riskos/internal/ui"
+
+	"github.com/effectivai/riskos-cli/internal/ui"
 )
 
 func buildUsecaseCmd() *cobra.Command {

@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"riskos/asset"
-	"riskos/internal/debug"
+
+	"github.com/effectivai/riskos-cli/asset"
+	"github.com/effectivai/riskos-cli/internal/debug"
 )
 
 const SpecURL = "https://raw.githubusercontent.com/socure-inc/.github/refs/heads/main/openapi-spec/riskos-webhooks-spec.json"

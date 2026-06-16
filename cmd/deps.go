@@ -4,8 +4,9 @@ import (
 	"context"
 
 	"github.com/spf13/cobra"
-	"riskos/internal/api"
-	"riskos/internal/config"
+
+	"github.com/effectivai/riskos-cli/internal/api"
+	"github.com/effectivai/riskos-cli/internal/config"
 )
 
 type depsKey struct{}
