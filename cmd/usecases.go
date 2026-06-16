@@ -7,23 +7,24 @@ import (
 	"riskos/internal/ui"
 )
 
-func buildUsecasesCmd() *cobra.Command {
-	usecasesCmd := &cobra.Command{
-		Use:   "usecases",
+func buildUsecaseCmd() *cobra.Command {
+	usecaseCmd := &cobra.Command{
+		Use:   "usecase",
 		Short: "Browse available use cases",
 	}
 
-	usecasesListCmd := &cobra.Command{
+	usecaseListCmd := &cobra.Command{
 		Use:     "list",
 		Short:   "List use cases configured for this account",
-		Example: "  riskos usecases list\n  riskos usecases list -o json",
+		Example: "  riskos usecase list\n  riskos usecase list -o json",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			client := newClient(cmd)
 			output := resolveOutput(cmd)
 
 			spin := ui.NewSpinner("Fetching use cases…")
 			spin.Start()
-			ucs, err := client.ListUseCases()
+			ucs, err := client.ListUseCases(ctx)
 			spin.Stop()
 			if err != nil {
 				ui.Abort("Failed to fetch use cases: "+err.Error(), "Check your API key:  riskos auth whoami", "")
@@ -34,7 +35,7 @@ func buildUsecasesCmd() *cobra.Command {
 				return nil
 			}
 
-			ui.Intro("riskos usecases list", fmt.Sprintf("%d found", len(ucs)))
+			ui.Intro("riskos usecase list", fmt.Sprintf("%d found", len(ucs)))
 			for _, uc := range ucs {
 				ui.StepActive(ui.Key.Render(uc.Name) + "  " + ui.Muted.Render(uc.DisplayName))
 				ui.StepValue("Blueprint", uc.BlueprintName, ui.Muted)
@@ -45,7 +46,7 @@ func buildUsecasesCmd() *cobra.Command {
 				nextUC = ucs[0].Name
 			}
 			ui.NextSteps([]string{
-				"riskos workflows list " + nextUC,
+				"riskos workflow list " + nextUC,
 				"riskos asset guide " + nextUC + " ./guide.md",
 			})
 			noun := "use cases"
@@ -57,6 +58,6 @@ func buildUsecasesCmd() *cobra.Command {
 		},
 	}
 
-	usecasesCmd.AddCommand(usecasesListCmd)
-	return usecasesCmd
+	usecaseCmd.AddCommand(usecaseListCmd)
+	return usecaseCmd
 }

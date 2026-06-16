@@ -7,25 +7,26 @@ import (
 	"riskos/internal/ui"
 )
 
-func buildWorkflowsCmd() *cobra.Command {
-	workflowsCmd := &cobra.Command{
-		Use:   "workflows",
+func buildWorkflowCmd() *cobra.Command {
+	workflowCmd := &cobra.Command{
+		Use:   "workflow",
 		Short: "Browse workflows for a use case",
 	}
 
-	workflowsListCmd := &cobra.Command{
+	workflowListCmd := &cobra.Command{
 		Use:     "list [usecase]",
 		Short:   "List workflows for a given use case",
-		Example: "  riskos workflows list consumer_onboarding",
+		Example: "  riskos workflow list consumer_onboarding",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			useCase := args[0]
 			client := newClient(cmd)
 			output := resolveOutput(cmd)
 
 			spin := ui.NewSpinner("Fetching workflows…")
 			spin.Start()
-			wfs, err := client.ListWorkflows(useCase)
+			wfs, err := client.ListWorkflows(ctx, useCase)
 			spin.Stop()
 			if err != nil {
 				ui.Abort("Failed to fetch workflows: "+err.Error(), "", "")
@@ -36,7 +37,7 @@ func buildWorkflowsCmd() *cobra.Command {
 				return nil
 			}
 
-			ui.Intro("riskos workflows list", useCase)
+			ui.Intro("riskos workflow list", useCase)
 			for _, w := range wfs {
 				ui.StepActive(ui.Key.Render(w.DisplayName))
 				ui.StepValue("ID", w.ID, ui.Muted)
@@ -56,6 +57,6 @@ func buildWorkflowsCmd() *cobra.Command {
 		},
 	}
 
-	workflowsCmd.AddCommand(workflowsListCmd)
-	return workflowsCmd
+	workflowCmd.AddCommand(workflowListCmd)
+	return workflowCmd
 }

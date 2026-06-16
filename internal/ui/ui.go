@@ -125,8 +125,23 @@ func Bar() {
 
 // ─── errors ──────────────────────────────────────────────────────────────────
 
-// Abort writes a human-readable error to stderr and exits 1.
-func Abort(msg, hint, docs string) {
+// AbortError is a sentinel error type used by Abort. Callers can type-assert
+// to detect a user-facing abort vs an unexpected error.
+type AbortError struct {
+	Msg  string
+	Hint string
+	Docs string
+}
+
+func (e *AbortError) Error() string {
+	if e.Hint != "" {
+		return fmt.Sprintf("%s (hint: %s)", e.Msg, e.Hint)
+	}
+	return e.Msg
+}
+
+// PrintAbort renders a human-readable error to stderr without exiting.
+func PrintAbort(msg, hint, docs string) {
 	fmt.Fprintf(os.Stderr, "  %s\n", bar())
 	fmt.Fprintf(os.Stderr, "  %s  %s\n", cross(), Err.Render(msg))
 	if hint != "" {
@@ -137,7 +152,13 @@ func Abort(msg, hint, docs string) {
 		fmt.Fprintf(os.Stderr, "  %s  %s %s\n", Spine.Render("│"), Muted.Render("docs:"), Accent.Render(docs))
 	}
 	fmt.Fprintln(os.Stderr)
-	os.Exit(1)
+}
+
+// Abort prints a styled error to stderr and panics with AbortError.
+// The panic is recovered in cmd.Execute() to produce a clean exit code.
+func Abort(msg, hint, docs string) {
+	PrintAbort(msg, hint, docs)
+	panic(&AbortError{Msg: msg, Hint: hint, Docs: docs})
 }
 
 // ─── JSON output ──────────────────────────────────────────────────────────────
@@ -148,14 +169,20 @@ func PrintJSON(v any) {
 }
 
 // ResolveOutput returns "json" if forced (non-TTY or explicit flag), else "plain".
-func ResolveOutput(flag string) string {
+// Returns an error if the flag value is invalid.
+func ResolveOutput(flag string) (string, error) {
 	if flag != "" {
-		return flag
+		switch flag {
+		case "plain", "json":
+			return flag, nil
+		default:
+			return "", fmt.Errorf("invalid output format %q (must be \"plain\" or \"json\")", flag)
+		}
 	}
 	if ForceJSON {
-		return "json"
+		return "json", nil
 	}
-	return "plain"
+	return "plain", nil
 }
 
 // DecisionBadge returns a styled decision string.
@@ -178,26 +205,30 @@ type Spinner struct {
 	current int
 	msg     string
 	done    chan struct{}
+	stopped chan struct{}
 }
 
 func NewSpinner(msg string) *Spinner {
 	return &Spinner{
-		frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
-		msg:    msg,
-		done:   make(chan struct{}),
+		frames:  []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		msg:     msg,
+		done:    make(chan struct{}),
+		stopped: make(chan struct{}),
 	}
 }
 
 func (s *Spinner) Start() {
 	if !IsTTY {
 		fmt.Fprintf(os.Stderr, "  %s\n", Muted.Render(s.msg))
+		close(s.stopped)
 		return
 	}
 	go func() {
+		defer close(s.stopped)
 		for {
 			select {
 			case <-s.done:
-				fmt.Printf("\r\033[2K") // clear line
+				fmt.Printf("\r\033[2K")
 				return
 			default:
 				s.mu.Lock()
@@ -226,17 +257,17 @@ func (s *Spinner) Stop() {
 		return
 	}
 	close(s.done)
-	time.Sleep(90 * time.Millisecond) // let goroutine clear line
+	<-s.stopped
 }
 
 // ─── progress bar ─────────────────────────────────────────────────────────────
 
 type ProgressBar struct {
-	total    int
-	current  int
-	width    int
-	title    string
-	start    time.Time
+	total   int
+	current int
+	width   int
+	title   string
+	start   time.Time
 }
 
 func NewProgressBar(total int, title string) *ProgressBar {
@@ -345,11 +376,4 @@ func minOf(a, b, c int) int {
 		return b
 	}
 	return c
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

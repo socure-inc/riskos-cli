@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"riskos/internal/api"
 	"riskos/internal/ui"
@@ -33,7 +34,7 @@ func buildTestcaseCmd() *cobra.Command {
 		Use: "list", Short: "List available sandbox test cases",
 		Example: "  riskos testcase list\n  riskos testcase list -o json",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			requireAuth()
+			requireAuth(cmd)
 			output := resolveOutput(cmd)
 			type tcRow struct {
 				TestName              string `json:"testName"`
@@ -67,7 +68,7 @@ func buildTestcaseCmd() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			requireAuth()
+			requireAuth(cmd)
 			p, ok := testPersonas[name]
 			if !ok {
 				s := ui.SuggestTypo(name, testPersonaOrder)
@@ -103,7 +104,7 @@ func buildTestcaseCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			client := newClient(cmd)
-			creds := requireAuth()
+			creds := requireAuth(cmd)
 			output := resolveOutput(cmd)
 			p, ok := testPersonas[name]
 			if !ok {
@@ -118,7 +119,7 @@ func buildTestcaseCmd() *cobra.Command {
 				ui.Abort("No Evaluation API key.", "Run:  riskos auth set-eval-key --api-key <uuid>", "")
 			}
 			evalReq := api.EvalRequest{
-				ID:        fmt.Sprintf("%x-%x", time.Now().UnixNano(), time.Now().UnixNano()>>16),
+				ID:        uuid.NewString(),
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
 				Workflow:  "consumer_onboarding",
 				Data: api.EvalRequestData{
@@ -128,7 +129,7 @@ func buildTestcaseCmd() *cobra.Command {
 			}
 			spin := ui.NewSpinner("Posting to sandbox evaluation API…")
 			spin.Start()
-			resp, err := client.RunEvaluation(creds.EvalKey, evalReq)
+			resp, err := client.RunEvaluation(cmd.Context(), creds.EvalKey, evalReq)
 			spin.Stop()
 			if err != nil {
 				ui.Abort("Evaluation failed: "+err.Error(), "Check your Eval API key:  riskos auth whoami",

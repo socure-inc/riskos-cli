@@ -2,33 +2,37 @@ package config
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
+
+	"github.com/zalando/go-keyring"
 )
 
-func TestSave_CreatesFileWith0600Permissions(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(dir)
+func TestMain(m *testing.M) {
+	keyring.MockInit()
+	os.Exit(m.Run())
+}
+
+func TestSave_StoresInKeyring(t *testing.T) {
+	keyring.MockInit()
+	s := NewStore("")
 	creds := &Credentials{APIKey: "key1", Namespace: "acme"}
 
 	if err := s.Save(creds); err != nil {
 		t.Fatal(err)
 	}
 
-	info, err := os.Stat(s.CredFile())
+	data, err := keyring.Get(ServiceName, KeyringUser)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("expected keyring to have credentials: %v", err)
 	}
-	if info.Mode().Perm() != 0600 {
-		t.Errorf("expected 0600, got %o", info.Mode().Perm())
+	if data == "" {
+		t.Error("expected non-empty keyring data")
 	}
 }
 
-func TestLoad_ReturnsNilWhenNoFile(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(filepath.Join(dir, "nonexistent"))
-
-	// Clear any env vars that could interfere
+func TestLoad_ReturnsNilWhenNoCredentials(t *testing.T) {
+	keyring.MockInit()
+	s := NewStore("")
 	t.Setenv("RISKOS_API_KEY", "")
 	t.Setenv("RISKOS_EVAL_KEY", "")
 
@@ -41,34 +45,28 @@ func TestLoad_ReturnsNilWhenNoFile(t *testing.T) {
 	}
 }
 
-func TestLoad_ReturnsCredsFromFile(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(dir)
-
+func TestLoad_ReturnsCredsFromKeyring(t *testing.T) {
+	keyring.MockInit()
+	s := NewStore("")
 	t.Setenv("RISKOS_API_KEY", "")
 	t.Setenv("RISKOS_EVAL_KEY", "")
 
-	if err := s.Save(&Credentials{APIKey: "from-file", Namespace: "ns1"}); err != nil {
-		t.Fatal(err)
-	}
+	s.Save(&Credentials{APIKey: "from-keyring", Namespace: "ns1"})
 
 	creds, err := s.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if creds == nil || creds.APIKey != "from-file" || creds.Namespace != "ns1" {
+	if creds == nil || creds.APIKey != "from-keyring" || creds.Namespace != "ns1" {
 		t.Errorf("unexpected creds: %+v", creds)
 	}
 }
 
 func TestLoad_OverlaysAPIKeyEnvVar(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(dir)
+	keyring.MockInit()
+	s := NewStore("")
 
-	if err := s.Save(&Credentials{APIKey: "file-key"}); err != nil {
-		t.Fatal(err)
-	}
-
+	s.Save(&Credentials{APIKey: "keyring-key"})
 	t.Setenv("RISKOS_API_KEY", "env-key")
 	t.Setenv("RISKOS_EVAL_KEY", "")
 
@@ -82,13 +80,10 @@ func TestLoad_OverlaysAPIKeyEnvVar(t *testing.T) {
 }
 
 func TestLoad_OverlaysEvalKeyEnvVar(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(dir)
+	keyring.MockInit()
+	s := NewStore("")
 
-	if err := s.Save(&Credentials{APIKey: "key1"}); err != nil {
-		t.Fatal(err)
-	}
-
+	s.Save(&Credentials{APIKey: "key1"})
 	t.Setenv("RISKOS_API_KEY", "")
 	t.Setenv("RISKOS_EVAL_KEY", "env-eval-key")
 
@@ -102,14 +97,10 @@ func TestLoad_OverlaysEvalKeyEnvVar(t *testing.T) {
 }
 
 func TestLoad_ReturnsNilWhenAPIKeyMissing(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(dir)
+	keyring.MockInit()
+	s := NewStore("")
 
-	// Save creds without an API key (shouldn't normally happen but test the guard)
-	if err := s.Save(&Credentials{Namespace: "ns"}); err != nil {
-		t.Fatal(err)
-	}
-
+	s.Save(&Credentials{Namespace: "ns"})
 	t.Setenv("RISKOS_API_KEY", "")
 	t.Setenv("RISKOS_EVAL_KEY", "")
 
@@ -122,41 +113,55 @@ func TestLoad_ReturnsNilWhenAPIKeyMissing(t *testing.T) {
 	}
 }
 
-func TestLoad_HandlesCorruptedJSONGracefully(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(dir)
+func TestLoad_HandlesCorruptedKeyringGracefully(t *testing.T) {
+	keyring.MockInit()
+	keyring.Set(ServiceName, KeyringUser, "{{not valid json}}")
 
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	// Write garbage JSON
-	if err := os.WriteFile(s.CredFile(), []byte("{{not valid json}}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
+	s := NewStore("")
 	t.Setenv("RISKOS_API_KEY", "")
 	t.Setenv("RISKOS_EVAL_KEY", "")
 
-	// Should not panic; returns nil (no API key)
 	creds, err := s.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if creds != nil {
-		t.Errorf("expected nil for corrupted JSON, got %+v", creds)
+		t.Errorf("expected nil for corrupted keyring, got %+v", creds)
 	}
 }
 
-func TestSave_CreatesDirectoryIfMissing(t *testing.T) {
-	base := t.TempDir()
-	dir := filepath.Join(base, "nested", "dir")
-	s := NewStore(dir)
+func TestDelete_RemovesFromKeyring(t *testing.T) {
+	keyring.MockInit()
+	s := NewStore("")
 
-	if err := s.Save(&Credentials{APIKey: "key1"}); err != nil {
+	s.Save(&Credentials{APIKey: "key1"})
+
+	if err := s.Delete(); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(s.CredFile()); err != nil {
-		t.Errorf("expected file to exist: %v", err)
+	_, err := keyring.Get(ServiceName, KeyringUser)
+	if err == nil {
+		t.Error("expected keyring to be empty after delete")
+	}
+}
+
+func TestSource_ReturnsCorrectSource(t *testing.T) {
+	keyring.MockInit()
+	s := NewStore("")
+	t.Setenv("RISKOS_API_KEY", "")
+
+	if src := s.Source(); src != SourceNone {
+		t.Errorf("expected none, got %s", src)
+	}
+
+	s.Save(&Credentials{APIKey: "key1"})
+	if src := s.Source(); src != SourceKeyring {
+		t.Errorf("expected keyring, got %s", src)
+	}
+
+	t.Setenv("RISKOS_API_KEY", "env-key")
+	if src := s.Source(); src != SourceEnvVar {
+		t.Errorf("expected env, got %s", src)
 	}
 }

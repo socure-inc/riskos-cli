@@ -3,10 +3,6 @@
 // Auth model:
 //   - CLI/MCP key  → Authorization: Bearer <api-key>  →  /api/mcp/* endpoints
 //   - Eval key     → Authorization: Bearer <eval-key> →  /api/evaluation
-//
-// Base URLs:
-//   - Sandbox:    https://riskos.sandbox.socure.com
-//   - Production: https://riskos.socure.com
 package api
 
 import (
@@ -17,17 +13,18 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"riskos/internal/config"
+	"riskos/internal/debug"
 )
 
 const (
-	BaseURLSandbox = "https://riskos.sandbox.socure.com"
-	BaseURLProd    = "https://riskos.socure.com"
+	DefaultBaseURL = "https://riskos.sandbox.socure.com"
 
-	// evalMaxRetries is the number of retry attempts for RunEvaluation.
-	evalMaxRetries = 2
+	// evalMaxAttempts is the total number of attempts for RunEvaluation (initial + retries).
+	evalMaxAttempts = 3
 	// evalDefaultRetryAfter is the fallback retry delay in seconds when the
 	// server does not provide a Retry-After value.
 	evalDefaultRetryAfter = 2
@@ -42,9 +39,9 @@ type RiskOSClient struct {
 
 // NewClientFromCreds builds a RiskOSClient from stored credentials.
 func NewClientFromCreds(creds *config.Credentials) *RiskOSClient {
-	base := BaseURLSandbox
-	if creds.Prod {
-		base = BaseURLProd
+	base := creds.BaseURL
+	if base == "" {
+		base = DefaultBaseURL
 	}
 	return &RiskOSClient{
 		baseURL: base,
@@ -65,6 +62,16 @@ func NewTestClient(apiKey, baseURL string) *RiskOSClient {
 // ─── core HTTP ────────────────────────────────────────────────────────────────
 
 func (c *RiskOSClient) do(ctx context.Context, method, path string, body io.Reader) ([]byte, int, error) {
+	var bodyBytes []byte
+	if body != nil {
+		var err error
+		bodyBytes, err = io.ReadAll(body)
+		if err != nil {
+			return nil, 0, fmt.Errorf("reading request body: %w", err)
+		}
+		body = bytes.NewReader(bodyBytes)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("building request: %w", err)
@@ -72,6 +79,12 @@ func (c *RiskOSClient) do(ctx context.Context, method, path string, body io.Read
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+
+	debug.Log("→ %s %s", method, c.baseURL+path)
+	debug.Log("→ Headers: %s", redactHeaders(req.Header))
+	if len(bodyBytes) > 0 {
+		debug.Log("→ Body: %s", string(bodyBytes))
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -82,67 +95,85 @@ func (c *RiskOSClient) do(ctx context.Context, method, path string, body io.Read
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("reading response body: %w", err)
 	}
+
+	debug.Log("← %d %s (%d bytes)", resp.StatusCode, resp.Status, len(b))
+	debug.Log("← Headers: %s", resp.Header)
+	debug.Log("← Body: %s", string(b))
+
 	return b, resp.StatusCode, nil
 }
 
-func (c *RiskOSClient) get(path string) (map[string]any, error) {
-	b, status, err := c.do(context.Background(), http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
+func redactHeaders(h http.Header) string {
+	var parts []string
+	for k, vals := range h {
+		v := strings.Join(vals, ", ")
+		if strings.EqualFold(k, "Authorization") {
+			v = "Bearer ***"
+		}
+		parts = append(parts, k+": "+v)
 	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
-	}
-	var result map[string]any
-	if err := json.Unmarshal(b, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-	return result, nil
+	return strings.Join(parts, " | ")
 }
 
-func (c *RiskOSClient) post(path string, payload any) (map[string]any, error) {
+func (c *RiskOSClient) getInto(ctx context.Context, path string, dest any) error {
+	b, status, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", status, string(b))
+	}
+	if err := json.Unmarshal(b, dest); err != nil {
+		return fmt.Errorf("unmarshal response: %w", err)
+	}
+	return nil
+}
+
+func (c *RiskOSClient) postInto(ctx context.Context, path string, payload, dest any) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return fmt.Errorf("marshal request: %w", err)
 	}
-	b, status, err := c.do(context.Background(), http.MethodPost, path, bytes.NewReader(encoded))
+	b, status, err := c.do(ctx, http.MethodPost, path, bytes.NewReader(encoded))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if status != http.StatusOK && status != http.StatusCreated {
-		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
+		return fmt.Errorf("HTTP %d: %s", status, string(b))
 	}
-	var result map[string]any
-	if err := json.Unmarshal(b, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+	if dest != nil {
+		if err := json.Unmarshal(b, dest); err != nil {
+			return fmt.Errorf("unmarshal response: %w", err)
+		}
 	}
-	return result, nil
+	return nil
 }
 
-func (c *RiskOSClient) patch(path string, payload any) (map[string]any, error) {
+func (c *RiskOSClient) patchInto(ctx context.Context, path string, payload, dest any) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return fmt.Errorf("marshal request: %w", err)
 	}
-	b, status, err := c.do(context.Background(), http.MethodPatch, path, bytes.NewReader(encoded))
+	b, status, err := c.do(ctx, http.MethodPatch, path, bytes.NewReader(encoded))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
+		return fmt.Errorf("HTTP %d: %s", status, string(b))
 	}
-	var result map[string]any
-	if err := json.Unmarshal(b, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+	if dest != nil {
+		if err := json.Unmarshal(b, dest); err != nil {
+			return fmt.Errorf("unmarshal response: %w", err)
+		}
 	}
-	return result, nil
+	return nil
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 // VerifyAPIKey calls GET /api/mcp/auth/verify with the CLI/MCP key.
-func (c *RiskOSClient) VerifyAPIKey() (*AuthVerifyResult, error) {
-	b, status, err := c.do(context.Background(), http.MethodGet, "/api/mcp/auth/verify", nil)
+func (c *RiskOSClient) VerifyAPIKey(ctx context.Context) (*AuthVerifyResult, error) {
+	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/auth/verify", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -164,94 +195,128 @@ func (c *RiskOSClient) VerifyAPIKey() (*AuthVerifyResult, error) {
 
 // ─── Use Cases ────────────────────────────────────────────────────────────────
 
-func (c *RiskOSClient) ListUseCases() ([]UseCase, error) {
-	result, err := c.get("/api/mcp/use-cases")
+func (c *RiskOSClient) ListUseCases(ctx context.Context) ([]UseCase, error) {
+	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/use-cases", nil)
 	if err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(result["useCases"])
-	if err != nil {
-		return nil, fmt.Errorf("marshal useCases: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
 	}
+	// API may return a bare array or {"useCases": [...]}
 	var ucs []UseCase
-	if err := json.Unmarshal(b, &ucs); err != nil {
-		return nil, fmt.Errorf("unmarshal useCases: %w", err)
+	if err := json.Unmarshal(b, &ucs); err == nil {
+		return ucs, nil
 	}
-	return ucs, nil
+	var wrapped useCasesResponse
+	if err := json.Unmarshal(b, &wrapped); err != nil {
+		return nil, fmt.Errorf("unmarshal use cases: %w", err)
+	}
+	return wrapped.UseCases, nil
 }
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
 
-func (c *RiskOSClient) ListWorkflows(useCase string) ([]Workflow, error) {
-	result, err := c.get("/api/mcp/workflows?use_case=" + url.QueryEscape(useCase))
+func (c *RiskOSClient) ListWorkflows(ctx context.Context, useCase string) ([]Workflow, error) {
+	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/workflows?use_case="+url.QueryEscape(useCase), nil)
 	if err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(result["workflows"])
-	if err != nil {
-		return nil, fmt.Errorf("marshal workflows: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
 	}
 	var wfs []Workflow
-	if err := json.Unmarshal(b, &wfs); err != nil {
+	if err := json.Unmarshal(b, &wfs); err == nil {
+		return wfs, nil
+	}
+	var wrapped workflowsResponse
+	if err := json.Unmarshal(b, &wrapped); err != nil {
 		return nil, fmt.Errorf("unmarshal workflows: %w", err)
 	}
-	return wfs, nil
+	return wrapped.Workflows, nil
 }
 
 // ─── Integration Checklist ────────────────────────────────────────────────────
 
-func (c *RiskOSClient) GetChecklist(useCase, blueprint string) ([]ChecklistTopic, error) {
+func (c *RiskOSClient) GetChecklist(ctx context.Context, useCase, blueprint string) ([]ChecklistTopic, error) {
 	path := "/api/mcp/integration-checklist?use_case=" + url.QueryEscape(useCase)
 	if blueprint != "" {
 		path += "&blueprint_name=" + url.QueryEscape(blueprint)
 	}
-	result, err := c.get(path)
+	b, status, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(result["checklist"])
-	if err != nil {
-		return nil, fmt.Errorf("marshal checklist: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
 	}
 	var topics []ChecklistTopic
-	if err := json.Unmarshal(b, &topics); err != nil {
+	if err := json.Unmarshal(b, &topics); err == nil {
+		return topics, nil
+	}
+	var wrapped checklistResponse
+	if err := json.Unmarshal(b, &wrapped); err != nil {
 		return nil, fmt.Errorf("unmarshal checklist: %w", err)
 	}
-	return topics, nil
+	return wrapped.Checklist, nil
 }
 
 // ─── Webhook Events ───────────────────────────────────────────────────────────
 
-func (c *RiskOSClient) ListWebhookEvents() ([]WebhookEventGroup, error) {
-	result, err := c.get("/api/mcp/webhook-events")
+func (c *RiskOSClient) ListWebhookEvents(ctx context.Context) ([]WebhookEventGroup, error) {
+	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/webhook-events", nil)
 	if err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(result["webhookEvents"])
-	if err != nil {
-		return nil, fmt.Errorf("marshal webhookEvents: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
 	}
 	var groups []WebhookEventGroup
-	if err := json.Unmarshal(b, &groups); err != nil {
-		return nil, fmt.Errorf("unmarshal webhookEvents: %w", err)
+	if err := json.Unmarshal(b, &groups); err == nil {
+		return groups, nil
 	}
-	return groups, nil
+	var wrapped webhookEventsResponse
+	if err := json.Unmarshal(b, &wrapped); err != nil {
+		return nil, fmt.Errorf("unmarshal webhook events: %w", err)
+	}
+	return wrapped.WebhookEvents, nil
 }
 
 // ─── Webhooks ─────────────────────────────────────────────────────────────────
 
-func (c *RiskOSClient) ListWebhooks() ([]WebhookConfig, error) {
-	result, err := c.get("/api/mcp/webhooks")
+func (c *RiskOSClient) ListWebhooks(ctx context.Context) ([]WebhookConfig, error) {
+	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/webhooks", nil)
 	if err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(result["webhooks"])
-	if err != nil {
-		return nil, fmt.Errorf("marshal webhooks: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
 	}
-	var configs []WebhookConfig
-	if err := json.Unmarshal(b, &configs); err != nil {
+	var raw rawWebhooksResponse
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil, fmt.Errorf("unmarshal webhooks: %w", err)
+	}
+	configs := make([]WebhookConfig, 0, len(raw.Configs))
+	for _, r := range raw.Configs {
+		useCase := ""
+		if len(r.UseCaseEvents) > 0 {
+			useCase = r.UseCaseEvents[0].UseCase
+		}
+		authScheme, _ := r.Medium.AuthSpec["authScheme"].(string)
+		if authScheme == "" {
+			switch {
+			case r.Medium.AuthSpec["token"] != nil:
+				authScheme = "BEARER_TOKEN"
+			case r.Medium.AuthSpec["username"] != nil:
+				authScheme = "BASIC_AUTH"
+			}
+		}
+		configs = append(configs, WebhookConfig{
+			Name:       r.Medium.Name,
+			URL:        r.Medium.URL,
+			UseCase:    useCase,
+			AuthScheme: authScheme,
+		})
 	}
 	return configs, nil
 }
@@ -298,7 +363,7 @@ func buildCompEvents(p *WebhookParams) []map[string]any {
 	return events
 }
 
-func (c *RiskOSClient) CreateWebhook(p *WebhookParams) (map[string]any, error) {
+func (c *RiskOSClient) CreateWebhook(ctx context.Context, p *WebhookParams) (map[string]any, error) {
 	payload := map[string]any{
 		"medium": map[string]any{
 			"name":     p.Name,
@@ -310,10 +375,14 @@ func (c *RiskOSClient) CreateWebhook(p *WebhookParams) (map[string]any, error) {
 			"compEvents": buildCompEvents(p),
 		}},
 	}
-	return c.post("/api/mcp/webhooks", payload)
+	var result map[string]any
+	if err := c.postInto(ctx, "/api/mcp/webhooks", payload, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
-func (c *RiskOSClient) UpdateWebhook(p *WebhookParams) (map[string]any, error) {
+func (c *RiskOSClient) UpdateWebhook(ctx context.Context, p *WebhookParams) (map[string]any, error) {
 	payload := map[string]any{
 		"url": p.URL,
 		"useCaseEvents": []map[string]any{{
@@ -321,31 +390,38 @@ func (c *RiskOSClient) UpdateWebhook(p *WebhookParams) (map[string]any, error) {
 			"compEvents": buildCompEvents(p),
 		}},
 	}
-	return c.patch("/api/mcp/webhooks/"+url.QueryEscape(p.Name), payload)
+	var result map[string]any
+	if err := c.patchInto(ctx, "/api/mcp/webhooks/"+url.QueryEscape(p.Name), payload, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // ─── Test Cases ───────────────────────────────────────────────────────────────
 
-func (c *RiskOSClient) ListTestCases(blueprint string) ([]TestCase, error) {
-	result, err := c.get("/api/mcp/test-cases?blueprint_name=" + url.QueryEscape(blueprint))
+func (c *RiskOSClient) ListTestCases(ctx context.Context, blueprint string) ([]TestCase, error) {
+	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/test-cases?blueprint_name="+url.QueryEscape(blueprint), nil)
 	if err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(result["testCases"])
-	if err != nil {
-		return nil, fmt.Errorf("marshal testCases: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
 	}
 	var tcs []TestCase
-	if err := json.Unmarshal(b, &tcs); err != nil {
-		return nil, fmt.Errorf("unmarshal testCases: %w", err)
+	if err := json.Unmarshal(b, &tcs); err == nil {
+		return tcs, nil
 	}
-	return tcs, nil
+	var wrapped testCasesResponse
+	if err := json.Unmarshal(b, &wrapped); err != nil {
+		return nil, fmt.Errorf("unmarshal test cases: %w", err)
+	}
+	return wrapped.TestCases, nil
 }
 
 // ─── Evaluation API ───────────────────────────────────────────────────────────
 
 // RunEvaluation calls POST /api/evaluation using the Evaluation API key (not the CLI key).
-func (c *RiskOSClient) RunEvaluation(evalKey string, req EvalRequest) (*EvalResponse, error) {
+func (c *RiskOSClient) RunEvaluation(ctx context.Context, evalKey string, req EvalRequest) (*EvalResponse, error) {
 	if evalKey == "" {
 		return nil, fmt.Errorf("no Evaluation API key — run: riskos auth set-eval-key --api-key <uuid>")
 	}
@@ -353,8 +429,8 @@ func (c *RiskOSClient) RunEvaluation(evalKey string, req EvalRequest) (*EvalResp
 	if err != nil {
 		return nil, fmt.Errorf("marshal eval request: %w", err)
 	}
-	for attempt := 0; attempt < evalMaxRetries; attempt++ {
-		httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, c.baseURL+"/api/evaluation", bytes.NewReader(encoded))
+	for attempt := 0; attempt < evalMaxAttempts; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/evaluation", bytes.NewReader(encoded))
 		if err != nil {
 			return nil, fmt.Errorf("building eval request: %w", err)
 		}
@@ -362,9 +438,13 @@ func (c *RiskOSClient) RunEvaluation(evalKey string, req EvalRequest) (*EvalResp
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "application/json")
 
+		debug.Log("→ POST %s (attempt %d/%d)", c.baseURL+"/api/evaluation", attempt+1, evalMaxAttempts)
+		debug.Log("→ Headers: %s", redactHeaders(httpReq.Header))
+		debug.Log("→ Body: %s", string(encoded))
+
 		resp, err := c.http.Do(httpReq)
 		if err != nil {
-			return nil, fmt.Errorf("cannot reach RiskOS sandbox: %w", err)
+			return nil, fmt.Errorf("cannot reach RiskOS API: %w", err)
 		}
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -372,7 +452,10 @@ func (c *RiskOSClient) RunEvaluation(evalKey string, req EvalRequest) (*EvalResp
 			return nil, fmt.Errorf("reading eval response: %w", err)
 		}
 
-		if resp.StatusCode == 429 && attempt == 0 {
+		debug.Log("← %d %s (%d bytes)", resp.StatusCode, resp.Status, len(body))
+		debug.Log("← Body: %s", string(body))
+
+		if resp.StatusCode == 429 && attempt < evalMaxAttempts-1 {
 			retryAfter := evalDefaultRetryAfter
 			var eb map[string]any
 			if json.Unmarshal(body, &eb) == nil {
@@ -380,7 +463,7 @@ func (c *RiskOSClient) RunEvaluation(evalKey string, req EvalRequest) (*EvalResp
 					retryAfter = int(v)
 				}
 			}
-			fmt.Printf("\r  Rate limited — retrying in %ds…\n", retryAfter)
+			fmt.Printf("\r  Rate limited — retrying in %ds (attempt %d/%d)…\n", retryAfter, attempt+1, evalMaxAttempts-1)
 			time.Sleep(time.Duration(retryAfter+1) * time.Second)
 			continue
 		}
@@ -393,5 +476,5 @@ func (c *RiskOSClient) RunEvaluation(evalKey string, req EvalRequest) (*EvalResp
 		}
 		return &result, nil
 	}
-	return nil, fmt.Errorf("evaluation failed after retries")
+	return nil, fmt.Errorf("evaluation failed after %d attempts", evalMaxAttempts)
 }

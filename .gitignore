@@ -1,14 +1,5 @@
-# Compiled binaries
-riskos
-riskos-darwin-arm64
-riskos-darwin-amd64
-riskos-linux-amd64
-riskos-linux-arm64
-riskos-windows-amd64.exe
-
-# Test coverage
-coverage.out
-coverage.html
+# Build output
+build/
 
 # Editor / OS
 .DS_Store

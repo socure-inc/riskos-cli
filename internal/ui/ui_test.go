@@ -10,7 +10,10 @@ func TestResolveOutput_ForcesJSONWhenForceJSONTrue(t *testing.T) {
 	ForceJSON = true
 	defer func() { ForceJSON = orig }()
 
-	out := ResolveOutput("")
+	out, err := ResolveOutput("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if out != "json" {
 		t.Errorf("expected json, got %s", out)
 	}
@@ -21,14 +24,27 @@ func TestResolveOutput_ReturnsExplicitFlagValue(t *testing.T) {
 	ForceJSON = false
 	defer func() { ForceJSON = orig }()
 
-	out := ResolveOutput("json")
+	out, err := ResolveOutput("json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if out != "json" {
 		t.Errorf("expected json, got %s", out)
 	}
 
-	out = ResolveOutput("plain")
+	out, err = ResolveOutput("plain")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if out != "plain" {
 		t.Errorf("expected plain, got %s", out)
+	}
+}
+
+func TestResolveOutput_RejectsInvalidValue(t *testing.T) {
+	_, err := ResolveOutput("potato")
+	if err == nil {
+		t.Error("expected error for invalid output format")
 	}
 }
 

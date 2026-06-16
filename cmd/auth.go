@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"os"
+	"syscall"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"riskos/internal/api"
 	"riskos/internal/config"
 	"riskos/internal/ui"
@@ -18,54 +20,53 @@ func buildAuthCmd() *cobra.Command {
 
 	authLoginCmd := &cobra.Command{
 		Use:   "login",
-		Short: "Authenticate with your RiskOS CLI/MCP API key",
-		Long: `Authenticate using your RiskOS CLI/MCP API key.
+		Short: "Authenticate interactively and store credentials in the OS keychain",
+		Long: `Authenticate with your RiskOS API keys.
 
-Two separate keys are used:
-  --api-key       CLI/MCP key  — authorises all discovery and management commands
-  --eval-api-key  Evaluation key — authorises testcase run (can be set later)
-
-Both keys are Bearer tokens issued from the RiskOS dashboard.`,
-		Example: `  riskos auth login --api-key <cli-mcp-key>
-  riskos auth login --api-key <cli-mcp-key> --eval-api-key <eval-key>
-  RISKOS_API_KEY=<key> riskos usecases list   # env var, no login needed`,
+Prompts for your CLI/MCP key (required) and Evaluation key (optional).
+Keys are verified against the RiskOS API, then stored securely in the
+OS keychain. On systems without keychain support, use environment
+variables instead (RISKOS_API_KEY, RISKOS_EVAL_KEY).`,
+		Example: "  riskos auth login",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			apiKey, _ := cmd.Flags().GetString("api-key")
-			evalKey, _ := cmd.Flags().GetString("eval-api-key")
-			prod, _ := cmd.Flags().GetBool("prod")
-
-			// Env var fallbacks
-			if apiKey == "" {
-				apiKey = os.Getenv("RISKOS_API_KEY")
-			}
-			if evalKey == "" {
-				evalKey = os.Getenv("RISKOS_EVAL_KEY")
-			}
-
-			// Interactive prompt if still missing
-			if apiKey == "" {
-				fmt.Print("  CLI/MCP API key: ")
-				fmt.Scan(&apiKey)
-			}
-
+			ctx := cmd.Context()
 			output := resolveOutput(cmd)
+			baseURL, _ := cmd.Root().PersistentFlags().GetString("base-url")
+
 			if output == "plain" {
 				ui.Intro("riskos auth login", "")
 			}
 
-			spin := ui.NewSpinner("Connecting to RiskOS…")
-			spin.Start()
-
-			creds := &config.Credentials{APIKey: apiKey, Prod: prod}
-			var client api.Client
-			if newClientFn != nil {
-				client = newClientFn()
-			} else {
-				client = api.NewClientFromCreds(creds)
+			// Prompt for CLI/MCP key
+			fmt.Print("  CLI/MCP API key: ")
+			apiKeyBytes, err := term.ReadPassword(int(syscall.Stdin))
+			if err != nil {
+				ui.Abort("Failed to read API key: "+err.Error(), "", "")
+			}
+			fmt.Println()
+			apiKey := string(apiKeyBytes)
+			if apiKey == "" {
+				ui.Abort("API key cannot be empty.", "", "")
 			}
 
-			spin.Update("Verifying CLI/MCP key…")
-			info, err := client.VerifyAPIKey()
+			// Prompt for Evaluation key (optional)
+			fmt.Print("  Evaluation API key (optional, Enter to skip): ")
+			evalKeyBytes, err := term.ReadPassword(int(syscall.Stdin))
+			if err != nil {
+				ui.Abort("Failed to read key: "+err.Error(), "", "")
+			}
+			fmt.Println()
+			evalKey := string(evalKeyBytes)
+
+			// Verify credentials
+			spin := ui.NewSpinner("Verifying…")
+			spin.Start()
+
+			creds := &config.Credentials{APIKey: apiKey, EvalKey: evalKey, BaseURL: baseURL}
+			d := depsFrom(cmd)
+			client := d.ClientFn(cmd, creds)
+
+			ucs, err := client.ListUseCases(ctx)
 			if err != nil {
 				spin.Stop()
 				ui.Abort(
@@ -75,74 +76,105 @@ Both keys are Bearer tokens issued from the RiskOS dashboard.`,
 				)
 			}
 
-			spin.Update("Authenticated ✔")
+			// Get namespace from verify endpoint
+			info, verifyErr := client.VerifyAPIKey(ctx)
 			spin.Stop()
+			if verifyErr != nil {
+				ui.Abort("Key verification failed: "+verifyErr.Error(), "", "")
+			}
 
 			creds.Namespace = info.Namespace
-			if evalKey != "" {
-				creds.EvalKey = evalKey
-			}
-			if err := defaultStoreFn().Save(creds); err != nil {
+
+			// Save to keyring
+			if err := d.Store.Save(creds); err != nil {
 				ui.Abort("Failed to save credentials: "+err.Error(), "", "")
 			}
 
-			env := map[bool]string{true: "production", false: "sandbox"}[prod]
+			displayURL := creds.BaseURL
+			if displayURL == "" {
+				displayURL = api.DefaultBaseURL
+			}
 
 			if output == "json" {
 				ui.PrintJSON(map[string]any{
-					"status":           "ok",
-					"namespace":        info.Namespace,
-					"environment":      env,
-					"eval_api_key_set": evalKey != "",
+					"status":     "ok",
+					"namespace":  info.Namespace,
+					"baseUrl":    displayURL,
+					"useCases":   len(ucs),
+					"evalKeySet": evalKey != "",
+					"source":     "keyring",
 				})
 				return nil
 			}
 
 			ui.StepDone("Authenticated")
 			ui.StepValue("Namespace", info.Namespace, ui.Key)
-			ui.StepValue("Environment", env, ui.Accent)
+			ui.StepValue("Base URL", displayURL, ui.Accent)
+			ui.StepValue("Use cases", fmt.Sprintf("%d available", len(ucs)), ui.Val)
 			if evalKey != "" {
-				ui.StepValue("Eval API key", "✔ set", ui.Success)
+				ui.StepValue("Eval key", "✔ stored", ui.Success)
 			} else {
-				ui.StepValue("Eval API key", "not set", ui.Muted)
-				ui.LogInfo("Set later:  riskos auth set-eval-key --api-key <uuid>")
+				ui.StepValue("Eval key", "skipped (re-run login to add)", ui.Muted)
 			}
+			ui.StepValue("Storage", "OS keychain", ui.Muted)
 			ui.NextSteps([]string{
-				"riskos usecases list",
-				"riskos asset guide consumer_onboarding ./guide.md",
+				"riskos usecase list",
+				"riskos auth status",
 			})
 			ui.Outro("You're all set!")
 			return nil
 		},
 	}
 
-	authWhoamiCmd := &cobra.Command{
-		Use:   "whoami",
-		Short: "Show current authentication status",
+	authStatusCmd := &cobra.Command{
+		Use:     "status",
+		Short:   "Show current authentication status and credential source",
+		Example: "  riskos auth status\n  riskos auth status -o json",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			creds, _ := defaultStoreFn().Load()
+			output := resolveOutput(cmd)
+			d := depsFrom(cmd)
+			source := d.Store.Source()
+			creds, _ := d.Store.Load()
+
 			if creds == nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), "  Not authenticated. Run: riskos auth login --api-key <key>")
+				if output == "json" {
+					ui.PrintJSON(map[string]any{"status": "unauthenticated", "source": string(source)})
+					return nil
+				}
+				ui.Intro("riskos auth status", "")
+				ui.StepActive(ui.Err.Render("Not authenticated"))
+				ui.LogInfo("Run:  riskos auth login")
+				ui.LogInfo("Or set RISKOS_API_KEY environment variable")
+				ui.Bar()
+				fmt.Println()
 				return nil
 			}
-			output := resolveOutput(cmd)
-			env := map[bool]string{true: "production", false: "sandbox"}[creds.Prod]
+
+			displayURL := creds.BaseURL
+			if displayURL == "" {
+				displayURL = api.DefaultBaseURL
+			}
+
 			if output == "json" {
 				ui.PrintJSON(map[string]any{
-					"namespace":        creds.Namespace,
-					"environment":      env,
-					"eval_api_key_set": creds.EvalKey != "",
-					"status":           "authenticated",
+					"status":     "authenticated",
+					"source":     string(source),
+					"namespace":  creds.Namespace,
+					"baseUrl":    displayURL,
+					"evalKeySet": creds.EvalKey != "",
 				})
 				return nil
 			}
-			ui.Intro("riskos auth whoami", "")
+
+			ui.Intro("riskos auth status", "")
+			ui.StepDone("Authenticated")
+			ui.StepValue("Source", string(source), ui.Accent)
 			ui.StepValue("Namespace", creds.Namespace, ui.Key)
-			ui.StepValue("Environment", env, ui.Accent)
+			ui.StepValue("Base URL", displayURL, ui.Muted)
 			if creds.EvalKey != "" {
-				ui.StepValue("Eval API key", "✔ set", ui.Success)
+				ui.StepValue("Eval key", "✔ set", ui.Success)
 			} else {
-				ui.StepValue("Eval API key", "not set", ui.Muted)
+				ui.StepValue("Eval key", "not set", ui.Muted)
 			}
 			ui.Bar()
 			fmt.Println()
@@ -150,43 +182,29 @@ Both keys are Bearer tokens issued from the RiskOS dashboard.`,
 		},
 	}
 
-	authSetEvalKeyCmd := &cobra.Command{
-		Use:     "set-eval-key",
-		Short:   "Store the Evaluation API key for running test cases",
-		Example: "  riskos auth set-eval-key --api-key <eval-api-key-uuid>",
+	authLogoutCmd := &cobra.Command{
+		Use:     "logout",
+		Short:   "Remove stored credentials from keychain",
+		Example: "  riskos auth logout",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key, _ := cmd.Flags().GetString("api-key")
-			if key == "" {
-				fmt.Print("  Evaluation API key: ")
-				fmt.Scan(&key)
-			}
-			creds := requireAuth()
-			creds.EvalKey = key
-			if err := defaultStoreFn().Save(creds); err != nil {
-				ui.Abort("Failed to save: "+err.Error(), "", "")
-			}
 			output := resolveOutput(cmd)
+			d := depsFrom(cmd)
+			if err := d.Store.Delete(); err != nil {
+				ui.Abort("Failed to remove credentials: "+err.Error(), "", "")
+			}
+
 			if output == "json" {
-				ui.PrintJSON(map[string]any{"status": "ok", "eval_api_key_set": true})
+				ui.PrintJSON(map[string]any{"status": "ok", "message": "credentials removed"})
 				return nil
 			}
-			ui.Intro("riskos auth set-eval-key", "")
-			ui.StepDone("Evaluation API key stored")
-			ui.NextSteps([]string{
-				"riskos testcase list",
-				"riskos testcase run Valid_Consumer_Accept",
-			})
-			ui.Outro("Ready to run test cases.")
+			ui.Intro("riskos auth logout", "")
+			ui.StepDone("Credentials removed from keychain")
+			ui.LogInfo("Environment variables (if set) will still be used.")
+			ui.Outro("Logged out.")
 			return nil
 		},
 	}
 
-	authLoginCmd.Flags().String("api-key", "", "CLI/MCP Bearer API key  [env: RISKOS_API_KEY]")
-	authLoginCmd.Flags().String("eval-api-key", "", "Evaluation API key       [env: RISKOS_EVAL_KEY]")
-	authLoginCmd.Flags().Bool("prod", false, "Use production endpoint")
-
-	authSetEvalKeyCmd.Flags().String("api-key", "", "Evaluation API key (Bearer token UUID)")
-
-	authCmd.AddCommand(authLoginCmd, authWhoamiCmd, authSetEvalKeyCmd)
+	authCmd.AddCommand(authLoginCmd, authStatusCmd, authLogoutCmd)
 	return authCmd
 }

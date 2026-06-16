@@ -1,26 +1,29 @@
 BINARY  = riskos
-VERSION = 1.0.0
+BUILD   = build
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build run clean cross test test-short coverage fmt lint
+.PHONY: build run clean cross test test-short coverage fmt lint vet pre-commit
 
 build:
-	go build $(LDFLAGS) -o $(BINARY) .
+	@mkdir -p $(BUILD)
+	go build $(LDFLAGS) -o $(BUILD)/$(BINARY) .
 
 run:
 	go run . $(ARGS)
 
 clean:
-	rm -f $(BINARY) riskos-*
+	rm -rf $(BUILD)
 
 cross:
-	GOOS=darwin  GOARCH=arm64  go build $(LDFLAGS) -o riskos-darwin-arm64  .
-	GOOS=darwin  GOARCH=amd64  go build $(LDFLAGS) -o riskos-darwin-amd64  .
-	GOOS=linux   GOARCH=amd64  go build $(LDFLAGS) -o riskos-linux-amd64   .
-	GOOS=linux   GOARCH=arm64  go build $(LDFLAGS) -o riskos-linux-arm64   .
-	GOOS=windows GOARCH=amd64  go build $(LDFLAGS) -o riskos-windows-amd64.exe .
+	@mkdir -p $(BUILD)
+	GOOS=darwin  GOARCH=arm64  go build $(LDFLAGS) -o $(BUILD)/riskos-darwin-arm64  .
+	GOOS=darwin  GOARCH=amd64  go build $(LDFLAGS) -o $(BUILD)/riskos-darwin-amd64  .
+	GOOS=linux   GOARCH=amd64  go build $(LDFLAGS) -o $(BUILD)/riskos-linux-amd64   .
+	GOOS=linux   GOARCH=arm64  go build $(LDFLAGS) -o $(BUILD)/riskos-linux-arm64   .
+	GOOS=windows GOARCH=amd64  go build $(LDFLAGS) -o $(BUILD)/riskos-windows-amd64.exe .
 	@echo "Built all targets:"
-	@ls -lh riskos-*
+	@ls -lh $(BUILD)/riskos-*
 
 test:
 	go test ./... -v
@@ -29,12 +32,20 @@ test-short:
 	go test ./... -short
 
 coverage:
-	go test ./... -coverprofile=coverage.out
-	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report: coverage.html"
+	@mkdir -p $(BUILD)
+	go test ./... -coverprofile=$(BUILD)/coverage.out
+	go tool cover -html=$(BUILD)/coverage.out -o $(BUILD)/coverage.html
+	@echo "Coverage report: $(BUILD)/coverage.html"
 
 fmt:
 	go fmt ./...
 
-lint:
+vet:
 	go vet ./...
+
+lint:
+	@which golangci-lint > /dev/null 2>&1 || (echo "Install: https://golangci-lint.run/welcome/install/" && exit 1)
+	golangci-lint run ./...
+
+pre-commit: fmt vet test build
+	@echo "All checks passed."

@@ -3,18 +3,21 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
-	_ "embed"
-
 	"github.com/spf13/cobra"
+	"riskos/internal/debug"
 	"riskos/internal/ui"
 )
 
-//go:embed assets/openapi.yaml
-var openAPIContent string
+const (
+	specURLAPI     = "https://raw.githubusercontent.com/socure-inc/.github/refs/heads/main/openapi-spec/riskos-api-spec.json"
+	specURLWebhook = "https://raw.githubusercontent.com/socure-inc/.github/refs/heads/main/openapi-spec/riskos-webhooks-spec.json"
+)
 
 func buildAssetCmd() *cobra.Command {
 	assetCmd := &cobra.Command{
@@ -33,12 +36,11 @@ func buildAssetCmd() *cobra.Command {
 			output := resolveOutput(cmd)
 			blueprint, _ := cmd.Flags().GetString("blueprint")
 
-			// Auto-resolve blueprint from use case list
 			if blueprint == "" {
 				spin := ui.NewSpinner("Resolving blueprint…")
 				spin.Start()
 				var err error
-				blueprint, err = resolveBlueprintForUseCase(client, useCase)
+				blueprint, err = resolveBlueprintForUseCase(cmd.Context(), client, useCase)
 				spin.Stop()
 				if err != nil {
 					ui.Abort("Cannot resolve blueprint: "+err.Error(), "", "")
@@ -47,13 +49,12 @@ func buildAssetCmd() *cobra.Command {
 
 			spin := ui.NewSpinner("Downloading integration guide…")
 			spin.Start()
-			topics, err := client.GetChecklist(useCase, blueprint)
+			topics, err := client.GetChecklist(cmd.Context(), useCase, blueprint)
 			spin.Stop()
 			if err != nil {
 				ui.Abort("Failed to download guide: "+err.Error(), "", "")
 			}
 
-			// Render to Markdown
 			var sb strings.Builder
 			fmt.Fprintf(&sb, "# RiskOS Integration Guide — %s\n\n", useCase)
 			if blueprint != "" {
@@ -87,8 +88,8 @@ func buildAssetCmd() *cobra.Command {
 			ui.StepValue("Steps", fmt.Sprintf("%d", totalSteps), ui.Accent)
 			ui.StepValue("Saved to", target, ui.Success)
 			ui.NextSteps([]string{
-				"riskos asset openapi ./riskos/openapi/openapi.yaml",
-				"riskos asset testcases " + useCase + " ./riskos/testcases/" + useCase + ".json",
+				"riskos asset openapi ./openapi.json",
+				"riskos asset testcases " + useCase + " ./testcases.json",
 			})
 			ui.Outro("Guide ready.")
 			return nil
@@ -97,25 +98,70 @@ func buildAssetCmd() *cobra.Command {
 
 	assetOpenAPICmd := &cobra.Command{
 		Use:     "openapi [target]",
-		Short:   "Download the OpenAPI specification",
-		Example: "  riskos asset openapi ./riskos/openapi/openapi.yaml",
+		Short:   "Download the RiskOS API OpenAPI specification",
+		Example: "  riskos asset openapi ./openapi.json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 			output := resolveOutput(cmd)
 
-			if err := writeFile(target, openAPIContent); err != nil {
+			spin := ui.NewSpinner("Downloading API spec…")
+			spin.Start()
+			content, err := downloadSpec(cmd, specURLAPI)
+			spin.Stop()
+			if err != nil {
+				ui.Abort("Failed to download spec: "+err.Error(), "", "")
+			}
+
+			if err := writeFile(target, content); err != nil {
 				ui.Abort("Failed to write file: "+err.Error(), "", "")
 			}
 
 			if output == "json" {
-				ui.PrintJSON(map[string]any{"status": "success", "path": target})
+				ui.PrintJSON(map[string]any{"status": "success", "path": target, "source": specURLAPI})
 				return nil
 			}
 
 			ui.Intro("riskos asset openapi", "")
-			ui.StepDone("OpenAPI specification downloaded")
-			ui.StepValue("Version", "3.1.0", ui.Accent)
+			ui.StepDone("API specification downloaded")
+			ui.StepValue("Saved to", target, ui.Success)
+			ui.NextSteps([]string{
+				"riskos asset webhook-spec ./webhooks.json",
+				"riskos webhook events",
+			})
+			ui.Outro("Spec ready.")
+			return nil
+		},
+	}
+
+	assetWebhookSpecCmd := &cobra.Command{
+		Use:     "webhook-spec [target]",
+		Short:   "Download the RiskOS Webhooks OpenAPI specification",
+		Example: "  riskos asset webhook-spec ./webhooks.json",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := args[0]
+			output := resolveOutput(cmd)
+
+			spin := ui.NewSpinner("Downloading webhook spec…")
+			spin.Start()
+			content, err := downloadSpec(cmd, specURLWebhook)
+			spin.Stop()
+			if err != nil {
+				ui.Abort("Failed to download spec: "+err.Error(), "", "")
+			}
+
+			if err := writeFile(target, content); err != nil {
+				ui.Abort("Failed to write file: "+err.Error(), "", "")
+			}
+
+			if output == "json" {
+				ui.PrintJSON(map[string]any{"status": "success", "path": target, "source": specURLWebhook})
+				return nil
+			}
+
+			ui.Intro("riskos asset webhook-spec", "")
+			ui.StepDone("Webhook specification downloaded")
 			ui.StepValue("Saved to", target, ui.Success)
 			ui.NextSteps([]string{
 				"riskos webhook events",
@@ -129,7 +175,7 @@ func buildAssetCmd() *cobra.Command {
 	assetTestCasesCmd := &cobra.Command{
 		Use:     "testcases [usecase] [target]",
 		Short:   "Download test cases for a use case",
-		Example: "  riskos asset testcases consumer_onboarding ./riskos/testcases/consumer_onboarding.json",
+		Example: "  riskos asset testcases consumer_onboarding ./testcases.json",
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useCase, target := args[0], args[1]
@@ -137,25 +183,23 @@ func buildAssetCmd() *cobra.Command {
 			output := resolveOutput(cmd)
 			blueprint, _ := cmd.Flags().GetString("blueprint")
 
-			// Auto-resolve blueprint
 			if blueprint == "" {
 				spin := ui.NewSpinner("Resolving blueprint…")
 				spin.Start()
 				var err error
-				blueprint, err = resolveBlueprintForUseCase(client, useCase)
+				blueprint, err = resolveBlueprintForUseCase(cmd.Context(), client, useCase)
 				spin.Stop()
 				if err != nil {
 					ui.Abort("Cannot resolve blueprint: "+err.Error(), "", "")
 				}
 			}
 
-			// Try fetching live test cases
 			var tcs any
 			count := 0
 			if blueprint != "" {
 				spin := ui.NewSpinner("Fetching test cases…")
 				spin.Start()
-				liveTCs, err := client.ListTestCases(blueprint)
+				liveTCs, err := client.ListTestCases(cmd.Context(), blueprint)
 				spin.Stop()
 				if err == nil && len(liveTCs) > 0 {
 					tcs = liveTCs
@@ -163,7 +207,6 @@ func buildAssetCmd() *cobra.Command {
 				}
 			}
 
-			// Fall back to built-in personas if none returned
 			if count == 0 {
 				type tc struct {
 					TestName              string `json:"testName"`
@@ -212,8 +255,31 @@ func buildAssetCmd() *cobra.Command {
 
 	assetGuideCmd.Flags().String("blueprint", "", "Blueprint name (auto-detected if omitted)")
 	assetTestCasesCmd.Flags().String("blueprint", "", "Blueprint name (auto-detected if omitted)")
-	assetCmd.AddCommand(assetGuideCmd, assetOpenAPICmd, assetTestCasesCmd)
+	assetCmd.AddCommand(assetGuideCmd, assetOpenAPICmd, assetWebhookSpecCmd, assetTestCasesCmd)
 	return assetCmd
+}
+
+func downloadSpec(cmd *cobra.Command, url string) (string, error) {
+	debug.Log("→ GET %s", url)
+	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("building request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	debug.Log("← %d %s", resp.StatusCode, resp.Status)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading response: %w", err)
+	}
+	debug.Log("← %d bytes downloaded", len(b))
+	return string(b), nil
 }
 
 func writeFile(path, content string) error {

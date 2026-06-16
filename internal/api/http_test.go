@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,7 @@ func TestVerifyAPIKey_Valid(t *testing.T) {
 	})
 	defer srv.Close()
 
-	res, err := client.VerifyAPIKey()
+	res, err := client.VerifyAPIKey(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestVerifyAPIKey_Unauthorized(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := client.VerifyAPIKey()
+	_, err := client.VerifyAPIKey(context.Background())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -54,7 +55,7 @@ func TestVerifyAPIKey_InvalidJSON(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := client.VerifyAPIKey()
+	_, err := client.VerifyAPIKey(context.Background())
 	if err == nil {
 		t.Fatal("expected unmarshal error")
 	}
@@ -72,7 +73,7 @@ func TestListUseCases_HappyPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	ucs, err := client.ListUseCases()
+	ucs, err := client.ListUseCases(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestListUseCases_ServerError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := client.ListUseCases()
+	_, err := client.ListUseCases(context.Background())
 	if err == nil {
 		t.Fatal("expected error on 500")
 	}
@@ -100,7 +101,7 @@ func TestListUseCases_Empty(t *testing.T) {
 	})
 	defer srv.Close()
 
-	ucs, err := client.ListUseCases()
+	ucs, err := client.ListUseCases(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestListWorkflows_HappyPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	wfs, err := client.ListWorkflows("consumer_onboarding")
+	wfs, err := client.ListWorkflows(context.Background(), "consumer_onboarding")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +149,7 @@ func TestGetChecklist_WithBlueprint(t *testing.T) {
 	})
 	defer srv.Close()
 
-	topics, err := client.GetChecklist("consumer_onboarding", "bp1")
+	topics, err := client.GetChecklist(context.Background(), "consumer_onboarding", "bp1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +167,7 @@ func TestGetChecklist_WithoutBlueprint(t *testing.T) {
 	})
 	defer srv.Close()
 
-	topics, err := client.GetChecklist("consumer_onboarding", "")
+	topics, err := client.GetChecklist(context.Background(), "consumer_onboarding", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +188,7 @@ func TestListWebhookEvents_HappyPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	groups, err := client.ListWebhookEvents()
+	groups, err := client.ListWebhookEvents(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,29 +202,48 @@ func TestListWebhookEvents_HappyPath(t *testing.T) {
 func TestListWebhooks_HappyPath(t *testing.T) {
 	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
-			"webhooks": []map[string]any{
-				{"name": "my-hook", "url": "https://example.com", "useCase": "consumer_onboarding", "authScheme": "BEARER_TOKEN"},
+			"configs": []map[string]any{
+				{
+					"medium": map[string]any{
+						"name":     "my-hook",
+						"url":      "https://example.com",
+						"authSpec": map[string]any{"authScheme": "BEARER_TOKEN"},
+					},
+					"useCaseEvents": []map[string]any{
+						{"useCase": "consumer_onboarding"},
+					},
+				},
 			},
+			"errs": []any{},
 		})
 	})
 	defer srv.Close()
 
-	configs, err := client.ListWebhooks()
+	configs, err := client.ListWebhooks(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(configs) != 1 || configs[0].Name != "my-hook" {
 		t.Errorf("unexpected: %+v", configs)
 	}
+	if configs[0].URL != "https://example.com" {
+		t.Errorf("expected URL https://example.com, got %s", configs[0].URL)
+	}
+	if configs[0].UseCase != "consumer_onboarding" {
+		t.Errorf("expected UseCase consumer_onboarding, got %s", configs[0].UseCase)
+	}
+	if configs[0].AuthScheme != "BEARER_TOKEN" {
+		t.Errorf("expected AuthScheme BEARER_TOKEN, got %s", configs[0].AuthScheme)
+	}
 }
 
 func TestListWebhooks_Empty(t *testing.T) {
 	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"webhooks": []any{}})
+		json.NewEncoder(w).Encode(map[string]any{"configs": []any{}, "errs": []any{}})
 	})
 	defer srv.Close()
 
-	configs, err := client.ListWebhooks()
+	configs, err := client.ListWebhooks(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +275,7 @@ func TestCreateWebhook_BearerToken(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := client.CreateWebhook(&WebhookParams{
+	_, err := client.CreateWebhook(context.Background(), &WebhookParams{
 		Name:        "my-hook",
 		URL:         "https://example.com",
 		UseCase:     "consumer_onboarding",
@@ -285,7 +305,7 @@ func TestCreateWebhook_BasicAuth(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := client.CreateWebhook(&WebhookParams{
+	_, err := client.CreateWebhook(context.Background(), &WebhookParams{
 		Name:              "my-hook",
 		URL:               "https://example.com",
 		UseCase:           "consumer_onboarding",
@@ -312,7 +332,7 @@ func TestUpdateWebhook(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := client.UpdateWebhook(&WebhookParams{
+	_, err := client.UpdateWebhook(context.Background(), &WebhookParams{
 		Name:    "my-hook",
 		URL:     "https://example.com",
 		UseCase: "consumer_onboarding",
@@ -334,7 +354,7 @@ func TestListTestCases_HappyPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	tcs, err := client.ListTestCases("bp1")
+	tcs, err := client.ListTestCases(context.Background(), "bp1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +369,7 @@ func TestListTestCases_Empty(t *testing.T) {
 	})
 	defer srv.Close()
 
-	tcs, err := client.ListTestCases("bp1")
+	tcs, err := client.ListTestCases(context.Background(), "bp1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +392,7 @@ func TestRunEvaluation_Success(t *testing.T) {
 	defer srv.Close()
 
 	req := EvalRequest{ID: "req-1", Workflow: "consumer_onboarding"}
-	resp, err := client.RunEvaluation("eval-key", req)
+	resp, err := client.RunEvaluation(context.Background(), "eval-key", req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +416,7 @@ func TestRunEvaluation_RateLimitRetry(t *testing.T) {
 	defer srv.Close()
 
 	req := EvalRequest{ID: "req-2", Workflow: "consumer_onboarding"}
-	resp, err := client.RunEvaluation("eval-key", req)
+	resp, err := client.RunEvaluation(context.Background(), "eval-key", req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +432,7 @@ func TestRunEvaluation_NoEvalKey(t *testing.T) {
 	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {})
 	defer srv.Close()
 
-	_, err := client.RunEvaluation("", EvalRequest{})
+	_, err := client.RunEvaluation(context.Background(), "", EvalRequest{})
 	if err == nil {
 		t.Fatal("expected error for empty eval key")
 	}
@@ -425,7 +445,7 @@ func TestRunEvaluation_NonCreatedError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := client.RunEvaluation("eval-key", EvalRequest{ID: "req-3"})
+	_, err := client.RunEvaluation(context.Background(), "eval-key", EvalRequest{ID: "req-3"})
 	if err == nil {
 		t.Fatal("expected error on 400")
 	}

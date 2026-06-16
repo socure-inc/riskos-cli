@@ -7,7 +7,7 @@ webhook management, and sandbox test execution.
 ## Build
 
 ```bash
-make build          # produces ./riskos
+make build          # produces build/riskos
 make cross          # builds for darwin/linux/windows
 ```
 
@@ -17,41 +17,52 @@ Requires Go 1.22+.
 
 Two separate Bearer tokens are needed:
 
-| Key | Flag / Env var | Used for |
-|-----|---------------|----------|
-| CLI/MCP key | `--api-key` / `RISKOS_API_KEY` | All `/api/mcp/*` endpoints |
-| Evaluation key | `--eval-api-key` / `RISKOS_EVAL_KEY` | `/api/evaluation` (test-case runs) |
+| Key | Env var | Used for |
+|-----|---------|----------|
+| CLI/MCP key | `RISKOS_API_KEY` | All `/api/mcp/*` endpoints |
+| Evaluation key | `RISKOS_EVAL_KEY` | `/api/evaluation` (test-case runs) |
+
+### Credential storage
+
+Credentials are stored securely in the **OS keychain** (macOS Keychain, GNOME Keyring, Windows Credential Manager) via [go-keyring](https://github.com/zalando/go-keyring).
+
+On systems without keychain support (CI, containers, headless servers), use environment variables directly — no login needed.
 
 ## Commands
 
 ### auth
 
 ```bash
-riskos auth login --api-key <key>            # authenticate and save credentials
-riskos auth login --api-key <key> --eval-api-key <uuid>
-riskos auth whoami                           # show current auth status
-riskos auth set-eval-key --api-key <uuid>   # store evaluation key
+riskos auth login          # interactive — prompts for CLI/MCP key and optional Eval key
+riskos auth status         # show current auth status and credential source
+riskos auth logout         # remove credentials from keychain
 ```
 
-### usecases
+**Login flow:**
+1. Prompts for CLI/MCP API key (echo suppressed)
+2. Optionally prompts for Evaluation API key
+3. Verifies against the RiskOS API
+4. Stores in OS keychain on success
+
+### usecase
 
 ```bash
-riskos usecases list                         # list configured use cases
-riskos usecases list -o json
+riskos usecase list                          # list configured use cases
 ```
 
-### workflows
+### workflow
 
 ```bash
-riskos workflows list consumer_onboarding    # list workflows for a use case
+riskos workflow list consumer_onboarding     # list workflows for a use case
 ```
 
 ### asset
 
 ```bash
-riskos asset guide consumer_onboarding ./guide.md        # integration guide (Markdown)
-riskos asset openapi ./openapi.yaml                       # OpenAPI 3.1 spec
-riskos asset testcases consumer_onboarding ./tcs.json    # test case JSON
+riskos asset guide consumer_onboarding ./guide.md            # integration guide (Markdown)
+riskos asset openapi ./openapi.json                          # RiskOS API OpenAPI spec
+riskos asset webhook-spec ./webhooks.json                    # Webhooks OpenAPI spec
+riskos asset testcases consumer_onboarding ./testcases.json  # test case JSON
 ```
 
 ### webhook
@@ -62,9 +73,9 @@ riskos webhook list                                       # list configured webh
 riskos webhook create --name my-hook --url https://... \
   --use-case consumer_onboarding \
   --workflow-events evaluation_completed \
-  --auth-scheme BEARER_TOKEN --bearer-token secret
+  --auth-scheme BEARER_TOKEN --bearer-token-file ./token.txt
 riskos webhook update --name my-hook --url https://... --use-case consumer_onboarding
-riskos webhook forward --target http://localhost:3000/webhooks/riskos
+riskos webhook simulate --target http://localhost:3000/webhooks/riskos
 ```
 
 ### testcase
@@ -79,7 +90,19 @@ riskos testcase run Valid_Consumer_Accept     # post to sandbox evaluation API
 
 | Variable | Description |
 |----------|-------------|
-| `RISKOS_API_KEY` | CLI/MCP Bearer token (overrides saved credentials) |
-| `RISKOS_EVAL_KEY` | Evaluation API Bearer token (overrides saved credentials) |
+| `RISKOS_API_KEY` | CLI/MCP Bearer token (overrides keychain credentials) |
+| `RISKOS_EVAL_KEY` | Evaluation API Bearer token (overrides keychain credentials) |
+| `RISKOS_BASE_URL` | API base URL (overrides keychain; overridden by `--base-url` flag) |
 | `RISKOS_QUIET` | Set to `1` to suppress informational output |
 | `NO_COLOR` | Disable colour output |
+
+**CI / headless usage:** Skip `auth login` entirely and set `RISKOS_API_KEY` (and optionally `RISKOS_EVAL_KEY`) as environment variables. All commands work without the keychain.
+
+## Global flags
+
+| Flag | Description |
+|------|-------------|
+| `--base-url <url>` | RiskOS API base URL (default: `https://riskos.sandbox.socure.com`). Use `https://riskos.socure.com` for production. |
+| `--debug` | Print HTTP request/response details |
+| `-o, --output` | Output format: `plain` or `json` |
+| `-q, --quiet` | Suppress informational output |

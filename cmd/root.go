@@ -1,49 +1,54 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"riskos/internal/api"
 	"riskos/internal/config"
+	"riskos/internal/debug"
 	"riskos/internal/ui"
 )
 
-// defaultStoreFn returns the default config.Store. Overridable in tests.
-var defaultStoreFn = func() *config.Store {
-	return config.DefaultStore()
+var rootCmd = buildRootCmd(DefaultDeps())
+
+// SetVersion overrides the version string (called from main with ldflags value).
+func SetVersion(v string) {
+	rootCmd.Version = v
 }
-
-// newClientFn is used by newClient for tests to inject a mock.
-// The variadic interface{} is not actually used — it exists to keep
-// the signature consistent without importing cobra here.
-var newClientFn func(...interface{}) api.Client
-
-var rootCmd = buildRootCmd()
 
 // buildRootCmd constructs a fresh root command with all subcommands attached.
 // It is called once at package init (stored in rootCmd) and can be called
-// again in tests to get an isolated tree.
-func buildRootCmd() *cobra.Command {
+// again in tests to get an isolated tree with custom deps.
+func buildRootCmd(d *Deps) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "riskos",
 		Short: "RiskOS CLI — execution layer for RiskOS integrations",
 		Long: `RiskOS CLI — execution layer for RiskOS integrations.
 
 Examples:
-  riskos auth login --api-key <your-riskos-api-key>
-  riskos usecases list
+  riskos auth login
+  riskos usecase list
   riskos asset guide consumer_onboarding ./guide.md
   riskos webhook events
-  riskos webhook forward --target http://localhost:3000/webhooks/riskos
+  riskos webhook simulate --target http://localhost:3000/webhooks/riskos
   riskos testcase run Valid_Consumer_Accept`,
-		Version:       "1.0.0",
+		Version:       "dev",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if v, _ := cmd.Root().PersistentFlags().GetBool("debug"); v {
+				debug.Enable()
+			}
+		},
 	}
 	initRootFlags(root)
 	attachSubcommands(root)
+	root.SetContext(withDeps(context.Background(), d))
 	return root
 }
 
@@ -52,22 +57,40 @@ func initRootFlags(root *cobra.Command) {
 		"Suppress informational output. Errors still print to stderr.")
 	root.PersistentFlags().StringP("output", "o", "",
 		"Output format: plain or json (default: plain in TTY, json when piped)")
-	root.PersistentFlags().Bool("prod", false,
-		"Use the production RiskOS endpoint instead of sandbox")
+	root.PersistentFlags().String("base-url", "",
+		"RiskOS API base URL (default: https://riskos.sandbox.socure.com)")
+	root.PersistentFlags().Bool("debug", false,
+		"Print HTTP request/response details for troubleshooting")
 }
 
 func attachSubcommands(root *cobra.Command) {
 	root.AddCommand(buildAuthCmd())
-	root.AddCommand(buildUsecasesCmd())
-	root.AddCommand(buildWorkflowsCmd())
+	root.AddCommand(buildUsecaseCmd())
+	root.AddCommand(buildWorkflowCmd())
 	root.AddCommand(buildAssetCmd())
 	root.AddCommand(buildWebhookCmd())
 	root.AddCommand(buildTestcaseCmd())
 }
 
 func Execute() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	rootCmd.SetContext(withDeps(ctx, DefaultDeps()))
+
+	code := 0
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(*ui.AbortError); ok {
+				code = 1
+			} else {
+				panic(r)
+			}
+		}
+		os.Exit(code)
+	}()
 	if err := rootCmd.Execute(); err != nil {
-		ui.Abort(err.Error(), "", "")
+		ui.PrintAbort(err.Error(), "", "")
+		code = 1
 	}
 }
 
@@ -85,12 +108,9 @@ func (e *cmdError) Error() string {
 }
 
 // requireAuth loads credentials or aborts with a helpful message.
-func requireAuth(store ...*config.Store) *config.Credentials {
-	s := defaultStoreFn()
-	if len(store) > 0 && store[0] != nil {
-		s = store[0]
-	}
-	creds, err := s.Load()
+func requireAuth(cmd *cobra.Command) *config.Credentials {
+	d := depsFrom(cmd)
+	creds, err := d.Store.Load()
 	if err != nil || creds == nil {
 		ui.Abort(
 			"Not authenticated.",
@@ -101,30 +121,11 @@ func requireAuth(store ...*config.Store) *config.Credentials {
 	return creds
 }
 
-// newClient builds a RiskOS API client from stored credentials.
-func newClient(cmd *cobra.Command, store ...*config.Store) api.Client {
-	// Allow tests to inject a mock client
-	if newClientFn != nil {
-		return newClientFn()
-	}
-	s := defaultStoreFn()
-	if len(store) > 0 && store[0] != nil {
-		s = store[0]
-	}
-	creds, err := s.Load()
-	if err != nil || creds == nil {
-		ui.Abort(
-			"Not authenticated.",
-			"Run:  riskos auth login --api-key <key>\n  │  Or set the RISKOS_API_KEY env var",
-			"",
-		)
-	}
-	prod, _ := cmd.Root().PersistentFlags().GetBool("prod")
-	if p, _ := cmd.Flags().GetBool("prod"); p {
-		prod = p
-	}
-	creds.Prod = prod
-	return api.NewClientFromCreds(creds)
+// newClient builds a RiskOS API client using deps from context.
+func newClient(cmd *cobra.Command) api.Client {
+	d := depsFrom(cmd)
+	creds := requireAuth(cmd)
+	return d.ClientFn(cmd, creds)
 }
 
 // resolveOutput returns the effective output format.
@@ -135,7 +136,11 @@ func resolveOutput(cmd *cobra.Command) string {
 			flag, _ = cmd.Root().PersistentFlags().GetString("output")
 		}
 	}
-	return ui.ResolveOutput(flag)
+	out, err := ui.ResolveOutput(flag)
+	if err != nil {
+		ui.Abort(err.Error(), "Valid values: plain, json", "")
+	}
+	return out
 }
 
 // isQuiet returns true if -q was passed or RISKOS_QUIET=1.

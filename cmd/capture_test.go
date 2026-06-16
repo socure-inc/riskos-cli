@@ -6,6 +6,7 @@ import (
 )
 
 // captureStdout temporarily redirects os.Stdout and returns what was written.
+// Recovers from ui.Abort panics so tests don't crash.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -18,7 +19,16 @@ func captureStdout(t *testing.T, fn func()) string {
 		os.Stdout = old
 	}()
 
-	fn()
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				if _, ok := p.(error); !ok {
+					panic(p)
+				}
+			}
+		}()
+		fn()
+	}()
 
 	w.Close()
 	buf := make([]byte, 64*1024)

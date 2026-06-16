@@ -1,6 +1,46 @@
 // Package api provides a direct REST client for the RiskOS API.
 package api
 
+// ─── Response wrappers for direct unmarshaling ───────────────────────────────
+
+type useCasesResponse struct {
+	UseCases []UseCase `json:"useCases"`
+}
+
+type workflowsResponse struct {
+	Workflows []Workflow `json:"workflows"`
+}
+
+type checklistResponse struct {
+	Checklist []ChecklistTopic `json:"checklist"`
+}
+
+type webhookEventsResponse struct {
+	WebhookEvents []WebhookEventGroup `json:"webhookEvents"`
+}
+
+type rawWebhookConfig struct {
+	Medium struct {
+		Name     string         `json:"name"`
+		URL      string         `json:"url"`
+		AuthSpec map[string]any `json:"authSpec"`
+	} `json:"medium"`
+	UseCaseEvents []struct {
+		UseCase string `json:"useCase"`
+	} `json:"useCaseEvents"`
+}
+
+type rawWebhooksResponse struct {
+	Configs []rawWebhookConfig `json:"configs"`
+	Errs    []string           `json:"errs"`
+}
+
+type testCasesResponse struct {
+	TestCases []TestCase `json:"testCases"`
+}
+
+// ─── Domain types ────────────────────────────────────────────────────────────
+
 // AuthVerifyResult is returned by VerifyAPIKey.
 type AuthVerifyResult struct {
 	Valid     bool   `json:"valid"`

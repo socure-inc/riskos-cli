@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -18,7 +19,7 @@ func TestUsecasesList_JSON(t *testing.T) {
 	t.Setenv("RISKOS_EVAL_KEY", "")
 
 	mock := &api.MockClient{
-		ListUseCasesFn: func() ([]api.UseCase, error) {
+		ListUseCasesFn: func(ctx context.Context) ([]api.UseCase, error) {
 			return []api.UseCase{
 				{Name: "consumer_onboarding", DisplayName: "Consumer Onboarding", BlueprintName: "bp1"},
 			}, nil
@@ -26,7 +27,7 @@ func TestUsecasesList_JSON(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runCmd(store, mock, "usecases", "list", "-o", "json")
+		runCmd(t, store, mock, "usecase", "list", "-o", "json")
 	})
 
 	var resp map[string]any
@@ -47,7 +48,7 @@ func TestUsecasesList_Plain(t *testing.T) {
 	t.Setenv("RISKOS_EVAL_KEY", "")
 
 	mock := &api.MockClient{
-		ListUseCasesFn: func() ([]api.UseCase, error) {
+		ListUseCasesFn: func(ctx context.Context) ([]api.UseCase, error) {
 			return []api.UseCase{
 				{Name: "consumer_onboarding", DisplayName: "Consumer Onboarding"},
 			}, nil
@@ -55,7 +56,7 @@ func TestUsecasesList_Plain(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runCmd(store, mock, "usecases", "list", "-o", "plain")
+		runCmd(t, store, mock, "usecase", "list", "-o", "plain")
 	})
 	if !strings.Contains(out, "consumer_onboarding") {
 		t.Errorf("expected use case name in output, got: %s", out)
@@ -63,13 +64,14 @@ func TestUsecasesList_Plain(t *testing.T) {
 }
 
 func TestUsecasesList_ServerError(t *testing.T) {
+	t.Parallel()
 	mock := &api.MockClient{
-		ListUseCasesFn: func() ([]api.UseCase, error) {
+		ListUseCasesFn: func(ctx context.Context) ([]api.UseCase, error) {
 			return nil, fmt.Errorf("HTTP 500: internal server error")
 		},
 	}
 
-	_, err := mock.ListUseCases()
+	_, err := mock.ListUseCases(context.Background())
 	if err == nil {
 		t.Error("expected error from server error mock")
 	}
