@@ -61,7 +61,11 @@ func NewTestClient(apiKey, baseURL string) *RiskOSClient {
 
 // ─── core HTTP ────────────────────────────────────────────────────────────────
 
-func (c *RiskOSClient) do(ctx context.Context, method, path string, body io.Reader) ([]byte, int, error) {
+type doOpts struct {
+	debugBody string // if non-empty, logged instead of raw body in debug mode
+}
+
+func (c *RiskOSClient) do(ctx context.Context, method, path string, body io.Reader, opts ...doOpts) ([]byte, int, error) {
 	var bodyBytes []byte
 	if body != nil {
 		var err error
@@ -83,7 +87,11 @@ func (c *RiskOSClient) do(ctx context.Context, method, path string, body io.Read
 	debug.Log("→ %s %s", method, c.baseURL+path)
 	debug.Log("→ Headers: %s", redactHeaders(req.Header))
 	if len(bodyBytes) > 0 {
-		debug.Log("→ Body: %s", string(bodyBytes))
+		logBody := string(bodyBytes)
+		if len(opts) > 0 && opts[0].debugBody != "" {
+			logBody = opts[0].debugBody
+		}
+		debug.Log("→ Body: %s", logBody)
 	}
 
 	resp, err := c.http.Do(req)
@@ -129,12 +137,12 @@ func (c *RiskOSClient) getInto(ctx context.Context, path string, dest any) error
 	return nil
 }
 
-func (c *RiskOSClient) postInto(ctx context.Context, path string, payload, dest any) error {
+func (c *RiskOSClient) postInto(ctx context.Context, path string, payload, dest any, opts ...doOpts) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
-	b, status, err := c.do(ctx, http.MethodPost, path, bytes.NewReader(encoded))
+	b, status, err := c.do(ctx, http.MethodPost, path, bytes.NewReader(encoded), opts...)
 	if err != nil {
 		return err
 	}
@@ -149,12 +157,12 @@ func (c *RiskOSClient) postInto(ctx context.Context, path string, payload, dest 
 	return nil
 }
 
-func (c *RiskOSClient) patchInto(ctx context.Context, path string, payload, dest any) error {
+func (c *RiskOSClient) patchInto(ctx context.Context, path string, payload, dest any, opts ...doOpts) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
-	b, status, err := c.do(ctx, http.MethodPatch, path, bytes.NewReader(encoded))
+	b, status, err := c.do(ctx, http.MethodPatch, path, bytes.NewReader(encoded), opts...)
 	if err != nil {
 		return err
 	}
@@ -375,8 +383,20 @@ func (c *RiskOSClient) CreateWebhook(ctx context.Context, p *WebhookParams) (map
 			"compEvents": buildCompEvents(p),
 		}},
 	}
+	safePayload := map[string]any{
+		"medium": map[string]any{
+			"name":     p.Name,
+			"url":      p.URL,
+			"authSpec": map[string]string{"authScheme": p.AuthScheme, "credentials": "[REDACTED]"},
+		},
+		"useCaseEvents": []map[string]any{{
+			"useCase":    p.UseCase,
+			"compEvents": buildCompEvents(p),
+		}},
+	}
+	safeBody, _ := json.Marshal(safePayload)
 	var result map[string]any
-	if err := c.postInto(ctx, "/api/mcp/webhooks", payload, &result); err != nil {
+	if err := c.postInto(ctx, "/api/mcp/webhooks", payload, &result, doOpts{debugBody: string(safeBody)}); err != nil {
 		return nil, err
 	}
 	return result, nil
