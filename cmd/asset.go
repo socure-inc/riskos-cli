@@ -197,37 +197,25 @@ func buildAssetCmd() *cobra.Command {
 				}
 			}
 
-			var tcs any
-			count := 0
-			if blueprint != "" {
-				spin := ui.NewSpinner("Fetching test cases…")
-				spin.Start()
-				liveTCs, err := client.ListTestCases(cmd.Context(), blueprint)
-				spin.Stop()
-				if err == nil && len(liveTCs) > 0 {
-					tcs = liveTCs
-					count = len(liveTCs)
-				}
+			if blueprint == "" {
+				ui.Abort("No blueprint configured for use case "+useCase, "", "")
 			}
 
-			if count == 0 {
-				type tc struct {
-					TestName              string `json:"testName"`
-					UseCase               string `json:"useCase"`
-					ExpectedFinalDecision string `json:"expectedFinalDecision"`
-					Description           string `json:"description"`
-				}
-				builtIn := []tc{
-					{"Valid_Consumer_Accept", useCase, "ACCEPT", "Standard consumer — passes KYC + Watchlist"},
-					{"Watchlist_Hit_Reject", useCase, "REJECT", "Consumer that triggers an OFAC watchlist hit"},
-					{"DocV_Required_Accept", useCase, "ACCEPT", "Consumer where DocV is triggered then passes"},
-					{"Fraud_Signal_Reject", useCase, "REJECT", "Consumer flagged by fraud signals"},
-				}
-				tcs = builtIn
-				count = len(builtIn)
+			spin := ui.NewSpinner("Fetching test cases…")
+			spin.Start()
+			tcs, err := client.ListTestCases(cmd.Context(), blueprint)
+			spin.Stop()
+			if err != nil {
+				ui.Abort("Failed to fetch test cases: "+err.Error(), "Check your API key:  riskos auth whoami", "")
 			}
+			count := len(tcs)
 
-			b, err := json.MarshalIndent(tcs, "", "  ")
+			// Marshal an empty (non-nil) slice as [] rather than null.
+			out := tcs
+			if out == nil {
+				out = []api.TestCase{}
+			}
+			b, err := json.MarshalIndent(out, "", "  ")
 			if err != nil {
 				ui.Abort("Failed to marshal test cases: "+err.Error(), "", "")
 			}
@@ -243,13 +231,16 @@ func buildAssetCmd() *cobra.Command {
 			}
 
 			ui.Intro("riskos asset testcases", "")
-			ui.StepDone(fmt.Sprintf("%d test cases downloaded", count))
+			if count == 0 {
+				ui.StepDone(fmt.Sprintf("No test cases configured for %q — wrote an empty list", useCase))
+			} else {
+				ui.StepDone(fmt.Sprintf("%d test cases downloaded", count))
+			}
 			ui.StepValue("Use case", useCase, ui.Key)
 			ui.StepValue("Count", fmt.Sprintf("%d", count), ui.Accent)
 			ui.StepValue("Saved to", target, ui.Success)
 			ui.NextSteps([]string{
-				"riskos testcase list",
-				"riskos testcase run Valid_Consumer_Accept",
+				"riskos testcase list " + useCase,
 			})
 			ui.Outro("Test cases ready.")
 			return nil

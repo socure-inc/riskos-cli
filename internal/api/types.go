@@ -107,15 +107,16 @@ type WebhookParams struct {
 
 // TestCase is a sandbox test case returned by ListTestCases.
 type TestCase struct {
-	ID         string `json:"id"`
-	TestName   string `json:"testName"`
-	UseCase    string `json:"usecase"`
-	Decision   string `json:"decision"`
-	Solution   string `json:"solution"`
-	IsActive   bool   `json:"isActive"`
-	HTTPMethod string `json:"httpMethod"`
-	URL        string `json:"url"`
-	ConfigType string `json:"configType"`
+	ID          string `json:"id"`
+	TestName    string `json:"testName"`
+	Description string `json:"description"`
+	UseCase     string `json:"useCase"`
+	Decision    string `json:"decision"`
+	Solution    string `json:"solution"`
+	IsActive    bool   `json:"isActive"`
+	HTTPMethod  string `json:"httpMethod"`
+	URL         string `json:"url"`
+	ConfigType  string `json:"configType"`
 }
 
 // EvalRequest is the payload sent to POST /api/evaluation.
