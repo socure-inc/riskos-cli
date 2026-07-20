@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/effectivai/riskos-cli/internal/api"
 	"github.com/effectivai/riskos-cli/internal/debug"
 	"github.com/effectivai/riskos-cli/internal/ui"
 )
@@ -66,7 +68,7 @@ func buildAssetCmd() *cobra.Command {
 				for _, step := range topic.Steps {
 					totalSteps++
 					fmt.Fprintf(&sb, "\n## %s. %s\n\n", step.ID, step.Title)
-					sb.WriteString(strings.TrimSpace(step.ContentSecondary))
+					sb.WriteString(strings.TrimSpace(decodeStepContent(step)))
 					sb.WriteString("\n")
 				}
 			}
@@ -281,6 +283,22 @@ func downloadSpec(cmd *cobra.Command, url string) (string, error) {
 	}
 	debug.Log("← %d bytes downloaded", len(b))
 	return string(b), nil
+}
+
+// decodeStepContent returns a checklist step's body text ready to write into the
+// guide. Markdown steps arrive base64-encoded and are decoded; any other content
+// type (including plain text) is returned as-is. If a markdown step fails to
+// decode, the raw value is returned so a single bad step never aborts the guide.
+func decodeStepContent(step api.ChecklistStep) string {
+	if strings.EqualFold(step.ContentType, "markdown") {
+		decoded, err := base64.StdEncoding.DecodeString(step.ContentSecondary)
+		if err != nil {
+			debug.Log("guide: failed to decode markdown step %s: %v", step.ID, err)
+			return step.ContentSecondary
+		}
+		return string(decoded)
+	}
+	return step.ContentSecondary
 }
 
 func writeFile(path, content string) error {
