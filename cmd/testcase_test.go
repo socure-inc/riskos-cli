@@ -27,7 +27,7 @@ func testcaseMock() *api.MockClient {
 		ListUseCasesFn: func(ctx context.Context) ([]api.UseCase, error) {
 			return []api.UseCase{{Name: "consumer_onboarding", BlueprintName: "bp1"}}, nil
 		},
-		ListTestCasesFn: func(ctx context.Context, blueprint string) ([]api.TestCase, error) {
+		ListTestCasesFn: func(ctx context.Context, useCase string) ([]api.TestCase, error) {
 			return []api.TestCase{
 				{TestName: "Valid_Consumer_Accept", UseCase: "consumer_onboarding", Decision: "ACCEPT", Description: "passes KYC"},
 				{TestName: "Watchlist_Hit_Reject", UseCase: "consumer_onboarding", Decision: "REJECT", Description: "OFAC hit"},
@@ -59,7 +59,7 @@ func TestTestcaseList_EmptyRendersJSONArray(t *testing.T) {
 		ListUseCasesFn: func(ctx context.Context) ([]api.UseCase, error) {
 			return []api.UseCase{{Name: "consumer_onboarding", BlueprintName: "bp1"}}, nil
 		},
-		ListTestCasesFn: func(ctx context.Context, blueprint string) ([]api.TestCase, error) {
+		ListTestCasesFn: func(ctx context.Context, useCase string) ([]api.TestCase, error) {
 			return nil, nil
 		},
 	}

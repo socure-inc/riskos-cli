@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -184,27 +185,15 @@ func buildAssetCmd() *cobra.Command {
 			useCase, target := args[0], args[1]
 			client := newClient(cmd)
 			output := resolveOutput(cmd)
-			blueprint, _ := cmd.Flags().GetString("blueprint")
-
-			if blueprint == "" {
-				spin := ui.NewSpinner("Resolving blueprint…")
-				spin.Start()
-				var err error
-				blueprint, err = resolveBlueprintForUseCase(cmd.Context(), client, useCase)
-				spin.Stop()
-				if err != nil {
-					ui.Abort("Cannot resolve blueprint: "+err.Error(), "", "")
-				}
-			}
-
-			if blueprint == "" {
-				ui.Abort("No blueprint configured for use case "+useCase, "", "")
-			}
 
 			spin := ui.NewSpinner("Fetching test cases…")
 			spin.Start()
-			tcs, err := client.ListTestCases(cmd.Context(), blueprint)
+			tcs, err := client.ListTestCases(cmd.Context(), useCase)
 			spin.Stop()
+			if errors.Is(err, api.ErrFeatureNotAvailable) {
+				ui.Abort("Test-case download isn't available on the connected server yet.",
+					"Please try again after the next RiskOS update.", "")
+			}
 			if err != nil {
 				ui.Abort("Failed to fetch test cases: "+err.Error(), "Check your API key:  riskos auth whoami", "")
 			}
@@ -248,7 +237,6 @@ func buildAssetCmd() *cobra.Command {
 	}
 
 	assetGuideCmd.Flags().String("blueprint", "", "Blueprint name (auto-detected if omitted)")
-	assetTestCasesCmd.Flags().String("blueprint", "", "Blueprint name (auto-detected if omitted)")
 	assetCmd.AddCommand(assetGuideCmd, assetOpenAPICmd, assetWebhookSpecCmd, assetTestCasesCmd)
 	return assetCmd
 }

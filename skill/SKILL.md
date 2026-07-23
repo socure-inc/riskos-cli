@@ -218,8 +218,8 @@ Use it to generate or validate integration code. Note: every workflow is unique 
 Discover available test cases:
 
 ```bash
-riskos testcase list
-riskos testcase describe <testcase_name>
+riskos testcase list <usecase>
+riskos testcase describe <usecase> <testcase_name>
 ```
 
 Download test cases for reference:
@@ -388,8 +388,8 @@ riskos webhook update --name <n> --url <u> --use-case <uc>
 | `riskos asset openapi <path>` | Download RiskOS API OpenAPI spec |
 | `riskos asset webhook-spec <path>` | Download webhooks OpenAPI spec |
 | `riskos asset testcases <usecase> <path>` | Download test cases (JSON) |
-| `riskos testcase list` | List sandbox test personas |
-| `riskos testcase describe <name>` | Show test case request payload |
+| `riskos testcase list <usecase>` | List test cases for a use case |
+| `riskos testcase describe <usecase> <name>` | Show test case request payload |
 | `riskos testcase run <name>` | Execute test case against sandbox (requires eval key) |
 | `riskos webhook events` | List available webhook event names |
 | `riskos webhook list` | List configured webhooks |

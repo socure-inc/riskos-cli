@@ -81,9 +81,9 @@ riskos webhook simulate --target http://localhost:3000/webhooks/riskos
 ### testcase
 
 ```bash
-riskos testcase list                          # list sandbox personas
-riskos testcase describe Watchlist_Hit_Reject # show request payload
-riskos testcase run Valid_Consumer_Accept     # post to sandbox evaluation API
+riskos testcase list consumer_onboarding                          # list test cases for a use case
+riskos testcase describe consumer_onboarding Watchlist_Hit_Reject # show request payload
+riskos testcase run Valid_Consumer_Accept                         # post to sandbox evaluation API
 ```
 
 ## Environment variables

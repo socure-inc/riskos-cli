@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,11 @@ import (
 	"github.com/effectivai/riskos-cli/internal/config"
 	"github.com/effectivai/riskos-cli/internal/debug"
 )
+
+// ErrFeatureNotAvailable indicates the connected RiskOS server does not yet
+// support an endpoint (e.g. it predates a rollout). Clients should treat it as
+// a soft "not available yet" condition rather than a hard error.
+var ErrFeatureNotAvailable = errors.New("feature not available on the connected server yet")
 
 const (
 	DefaultBaseURL = "https://riskos.sandbox.socure.com"
@@ -419,10 +425,18 @@ func (c *RiskOSClient) UpdateWebhook(ctx context.Context, p *WebhookParams) (map
 
 // ─── Test Cases ───────────────────────────────────────────────────────────────
 
-func (c *RiskOSClient) ListTestCases(ctx context.Context, blueprint string) ([]TestCase, error) {
-	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/test-cases?blueprint_name="+url.QueryEscape(blueprint), nil)
+// ListTestCases loads active evaluation test cases for the given use case via
+// GET /api/mcp/test-cases/v2. A 404 means the connected server does not yet
+// expose the v2 endpoint (it predates this rollout); that is surfaced as
+// ErrFeatureNotAvailable so callers can show a soft message instead of a hard
+// error.
+func (c *RiskOSClient) ListTestCases(ctx context.Context, useCase string) ([]TestCase, error) {
+	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/test-cases/v2?use_case="+url.QueryEscape(useCase), nil)
 	if err != nil {
 		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, ErrFeatureNotAvailable
 	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))

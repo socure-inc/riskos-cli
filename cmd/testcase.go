@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -40,15 +41,14 @@ func buildTestcaseCmd() *cobra.Command {
 			client := newClient(cmd)
 			output := resolveOutput(cmd)
 
-			blueprint, err := resolveTestcaseBlueprint(cmd, client, useCase)
-			if err != nil {
-				ui.Abort("Cannot resolve blueprint: "+err.Error(), "", "")
-			}
-
 			spin := ui.NewSpinner("Fetching test cases…")
 			spin.Start()
-			tcs, err := client.ListTestCases(cmd.Context(), blueprint)
+			tcs, err := client.ListTestCases(cmd.Context(), useCase)
 			spin.Stop()
+			if errors.Is(err, api.ErrFeatureNotAvailable) {
+				ui.LogInfo("Test-case listing isn't available on the connected server yet. Please try again after the next RiskOS update.")
+				return nil
+			}
 			if err != nil {
 				ui.Abort("Failed to fetch test cases: "+err.Error(), "Check your API key:  riskos auth whoami", "")
 			}
@@ -90,15 +90,14 @@ func buildTestcaseCmd() *cobra.Command {
 			client := newClient(cmd)
 			output := resolveOutput(cmd)
 
-			blueprint, err := resolveTestcaseBlueprint(cmd, client, useCase)
-			if err != nil {
-				ui.Abort("Cannot resolve blueprint: "+err.Error(), "", "")
-			}
-
 			spin := ui.NewSpinner("Fetching test cases…")
 			spin.Start()
-			tcs, err := client.ListTestCases(cmd.Context(), blueprint)
+			tcs, err := client.ListTestCases(cmd.Context(), useCase)
 			spin.Stop()
+			if errors.Is(err, api.ErrFeatureNotAvailable) {
+				ui.LogInfo("Test-case listing isn't available on the connected server yet. Please try again after the next RiskOS update.")
+				return nil
+			}
 			if err != nil {
 				ui.Abort("Failed to fetch test cases: "+err.Error(), "Check your API key:  riskos auth whoami", "")
 			}
@@ -224,29 +223,8 @@ func buildTestcaseCmd() *cobra.Command {
 		},
 	}
 
-	testcaseListCmd.Flags().String("blueprint", "", "Blueprint name (auto-detected if omitted)")
-	testcaseDescribeCmd.Flags().String("blueprint", "", "Blueprint name (auto-detected if omitted)")
 	testcaseCmd.AddCommand(testcaseListCmd, testcaseDescribeCmd, testcaseRunCmd)
 	return testcaseCmd
-}
-
-// resolveTestcaseBlueprint returns the blueprint name to query test cases for,
-// honoring an explicit --blueprint flag and otherwise resolving it from the use case.
-func resolveTestcaseBlueprint(cmd *cobra.Command, client api.Client, useCase string) (string, error) {
-	if bp, _ := cmd.Flags().GetString("blueprint"); bp != "" {
-		return bp, nil
-	}
-	spin := ui.NewSpinner("Resolving blueprint…")
-	spin.Start()
-	bp, err := resolveBlueprintForUseCase(cmd.Context(), client, useCase)
-	spin.Stop()
-	if err != nil {
-		return "", err
-	}
-	if bp == "" {
-		return "", fmt.Errorf("no blueprint configured for use case %q", useCase)
-	}
-	return bp, nil
 }
 
 // nonNilTestCases returns tcs, or an empty (non-nil) slice so JSON output renders

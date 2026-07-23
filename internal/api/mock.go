@@ -13,7 +13,7 @@ type MockClient struct {
 	ListWebhooksFn      func(ctx context.Context) ([]WebhookConfig, error)
 	CreateWebhookFn     func(ctx context.Context, p *WebhookParams) (map[string]any, error)
 	UpdateWebhookFn     func(ctx context.Context, p *WebhookParams) (map[string]any, error)
-	ListTestCasesFn     func(ctx context.Context, blueprint string) ([]TestCase, error)
+	ListTestCasesFn     func(ctx context.Context, useCase string) ([]TestCase, error)
 	RunEvaluationFn     func(ctx context.Context, evalKey string, req EvalRequest) (*EvalResponse, error)
 }
 
@@ -73,9 +73,9 @@ func (m *MockClient) UpdateWebhook(ctx context.Context, p *WebhookParams) (map[s
 	return nil, nil
 }
 
-func (m *MockClient) ListTestCases(ctx context.Context, blueprint string) ([]TestCase, error) {
+func (m *MockClient) ListTestCases(ctx context.Context, useCase string) ([]TestCase, error) {
 	if m.ListTestCasesFn != nil {
-		return m.ListTestCasesFn(ctx, blueprint)
+		return m.ListTestCasesFn(ctx, useCase)
 	}
 	return nil, nil
 }

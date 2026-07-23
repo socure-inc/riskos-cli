@@ -13,6 +13,6 @@ type Client interface {
 	ListWebhooks(ctx context.Context) ([]WebhookConfig, error)
 	CreateWebhook(ctx context.Context, p *WebhookParams) (map[string]any, error)
 	UpdateWebhook(ctx context.Context, p *WebhookParams) (map[string]any, error)
-	ListTestCases(ctx context.Context, blueprint string) ([]TestCase, error)
+	ListTestCases(ctx context.Context, useCase string) ([]TestCase, error)
 	RunEvaluation(ctx context.Context, evalKey string, req EvalRequest) (*EvalResponse, error)
 }

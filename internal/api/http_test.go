@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -346,6 +347,12 @@ func TestUpdateWebhook(t *testing.T) {
 
 func TestListTestCases_HappyPath(t *testing.T) {
 	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/mcp/test-cases/v2") {
+			t.Errorf("expected /api/mcp/test-cases/v2, got %s", r.URL.Path)
+		}
+		if !strings.Contains(r.URL.RawQuery, "use_case=consumer_onboarding") {
+			t.Errorf("expected use_case query param, got %s", r.URL.RawQuery)
+		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"testCases": []map[string]any{
 				{"id": "tc1", "testName": "Valid_Consumer_Accept", "decision": "ACCEPT"},
@@ -354,7 +361,7 @@ func TestListTestCases_HappyPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	tcs, err := client.ListTestCases(context.Background(), "bp1")
+	tcs, err := client.ListTestCases(context.Background(), "consumer_onboarding")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,12 +376,27 @@ func TestListTestCases_Empty(t *testing.T) {
 	})
 	defer srv.Close()
 
-	tcs, err := client.ListTestCases(context.Background(), "bp1")
+	tcs, err := client.ListTestCases(context.Background(), "consumer_onboarding")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(tcs) != 0 {
 		t.Errorf("expected empty")
+	}
+}
+
+// TestListTestCases_NotFoundIsFeatureUnavailable verifies that a 404 (a server
+// that predates the /test-cases/v2 route) is surfaced as ErrFeatureNotAvailable
+// rather than a generic error, so clients can degrade gracefully.
+func TestListTestCases_NotFoundIsFeatureUnavailable(t *testing.T) {
+	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer srv.Close()
+
+	_, err := client.ListTestCases(context.Background(), "consumer_onboarding")
+	if !errors.Is(err, ErrFeatureNotAvailable) {
+		t.Errorf("expected ErrFeatureNotAvailable, got %v", err)
 	}
 }
 
