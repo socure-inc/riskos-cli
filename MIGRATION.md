@@ -6,9 +6,11 @@ integrations.
 The replacement has two parts:
 
 - RiskOS MCP provides OAuth-authenticated RiskOS tools, prompts, and resources.
-- [RiskOS Agent Kit](https://github.com/effectivai/riskos-agent-kit) teaches
-  supported agents how to use those tools and includes narrow local smoke
-  scripts.
+- The RiskOS Agent Kit distributed by Socure teaches supported agents how to
+  use those tools and includes narrow local smoke scripts.
+
+Request the Agent Kit package from your Socure representative or support
+contact. It is not downloaded from a public repository.
 
 ## Authentication
 
@@ -40,7 +42,9 @@ The hosted MCP server never receives a customer's direct Evaluation API key.
 | `riskos webhook list` | `riskos_manage_webhooks` with the list action |
 | `riskos webhook create` | `riskos_manage_webhooks` with preview, confirmation, and idempotency |
 | `riskos webhook update` | `riskos_manage_webhooks` with preview, confirmation, and idempotency |
-| `riskos webhook simulate` | Agent Kit `webhook_receiver.py` and `webhook_smoke.py` |
+| `riskos webhook simulate --dry-run` | Agent Kit `webhook_smoke.py --dry-run` |
+| `riskos webhook simulate --target http://localhost...` | Agent Kit `webhook_receiver.py` and `webhook_smoke.py` |
+| `riskos webhook simulate --target https://remote...` | Use the confirmed webhook test action through `riskos_manage_webhooks`, or test the customer endpoint with their own approved HTTP client |
 | `riskos testcase list` | `riskos_manage_test_cases` with the list action |
 | `riskos testcase describe` | `riskos_manage_test_cases` with the get action |
 | `riskos testcase run` | `riskos_submit_sandbox_evaluation` |

@@ -4,12 +4,24 @@ description: "Legacy compatibility guidance for Socure RiskOS API integration us
 ---
 
 > Compatibility notice: Use the OAuth-enabled RiskOS MCP server and the
-> `effectivai/riskos-agent-kit` skill for new integrations. Follow this skill
-> only when maintaining an existing CLI-based integration during migration.
+> RiskOS Agent Kit distributed by Socure for new integrations. Follow this
+> skill only when maintaining an existing CLI-based integration during
+> migration.
+
+## Routing Gate
+
+- For a new integration, stop. Do not run RiskOS CLI commands.
+- Direct the user to the Accounts v2 OAuth RiskOS MCP and RiskOS Agent Kit.
+- Tell the user to request the Agent Kit package from their Socure
+  representative or support contact.
+- Continue with this skill only when the user explicitly confirms that they are
+  maintaining or migrating an existing CLI-based integration.
 
 ## Objective
 
-Guide the user through a **complete, working integration** with the RiskOS Platform using the `riskos` CLI tool.
+Keep an existing RiskOS CLI integration working while moving its discovery,
+documentation, webhook, and Sandbox test flows to RiskOS MCP and the Agent Kit.
+Use CLI commands only for compatibility checks that the migration still needs.
 
 The integration is considered successful only when a client application can invoke a **live Sandbox workflow by making an API call**, receive a **RiskOS decision** (Accept, Reject, or Review), and correctly handle the response.
 
@@ -17,7 +29,9 @@ The integration is considered successful only when a client application can invo
 
 ## Core Principles
 
-- Integration is the final goal — do not stop at documentation or setup steps
+- Migration from the CLI is the final goal.
+- Do not start a new CLI-based integration.
+- Existing integrations must remain working until replacement checks pass.
 - Progress step-by-step and confirm required inputs before advancing
 - Use CLI output and downloaded assets as the **single source of truth**
 - Prefer Sandbox-based validation before any Production discussion

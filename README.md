@@ -2,15 +2,20 @@
 
 > [!WARNING]
 > RiskOS CLI is in compatibility maintenance. Use the OAuth-enabled RiskOS MCP
-> server and the [RiskOS Agent Kit](https://github.com/effectivai/riskos-agent-kit)
-> for new integrations. This repository now receives security and critical
-> correctness fixes only.
+> server and the RiskOS Agent Kit for new integrations. See the
+> [RiskOS documentation](https://help.socure.com/riskos) for customer guidance.
+> This repository now receives security and critical correctness fixes only.
+
+The Agent Kit is distributed by Socure. Customers should request the package
+from their Socure representative or support contact before starting migration.
 
 A Go CLI for integrating with the [RiskOS](https://riskos.socure.com) platform.
 It covers authentication, use-case discovery, integration guide generation,
 webhook management, and sandbox test execution.
 
 See [MIGRATION.md](MIGRATION.md) for the command-by-command replacement.
+The interactive compatibility notice is suppressed for JSON, non-TTY, and quiet
+invocations so existing automation remains unchanged.
 
 ## Build
 

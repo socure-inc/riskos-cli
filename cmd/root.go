@@ -19,7 +19,7 @@ var rootCmd = buildRootCmd(DefaultDeps())
 
 const (
 	deprecationNotice = "RiskOS CLI is in compatibility maintenance. Use the RiskOS MCP server and RiskOS Agent Kit for new integrations."
-	agentKitURL       = "https://github.com/effectivai/riskos-agent-kit"
+	migrationURL      = "https://help.socure.com/riskos"
 )
 
 // SetVersion overrides the version string (called from main with ldflags value).
@@ -54,8 +54,8 @@ Examples:
 			if v, _ := cmd.Root().PersistentFlags().GetBool("debug"); v {
 				debug.Enable()
 			}
-			if !isQuiet(cmd) {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\nmigration: %s\n", deprecationNotice, agentKitURL)
+			if shouldShowCompatibilityNotice(cmd) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\nmigration: %s\n", deprecationNotice, migrationURL)
 			}
 		},
 	}
@@ -160,4 +160,12 @@ func resolveOutput(cmd *cobra.Command) string {
 func isQuiet(cmd *cobra.Command) bool {
 	q, _ := cmd.Flags().GetBool("quiet")
 	return q || os.Getenv("RISKOS_QUIET") == "1"
+}
+
+func shouldShowCompatibilityNotice(cmd *cobra.Command) bool {
+	if isQuiet(cmd) || !ui.IsTTY {
+		return false
+	}
+	output, _ := cmd.Root().PersistentFlags().GetString("output")
+	return output != "json"
 }
