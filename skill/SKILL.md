@@ -1,7 +1,11 @@
 ---
 name: riskos-cli-integration-skill
-description: "This skill focuses on Socure RiskOS API integration using the RiskOS CLI"
+description: "Legacy compatibility guidance for Socure RiskOS API integration using RiskOS CLI"
 ---
+
+> Compatibility notice: Use the OAuth-enabled RiskOS MCP server and the
+> `effectivai/riskos-agent-kit` skill for new integrations. Follow this skill
+> only when maintaining an existing CLI-based integration during migration.
 
 ## Objective
 

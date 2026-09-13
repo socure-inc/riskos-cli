@@ -1,8 +1,16 @@
 # RiskOS CLI
 
+> [!WARNING]
+> RiskOS CLI is in compatibility maintenance. Use the OAuth-enabled RiskOS MCP
+> server and the [RiskOS Agent Kit](https://github.com/effectivai/riskos-agent-kit)
+> for new integrations. This repository now receives security and critical
+> correctness fixes only.
+
 A Go CLI for integrating with the [RiskOS](https://riskos.socure.com) platform.
 It covers authentication, use-case discovery, integration guide generation,
 webhook management, and sandbox test execution.
+
+See [MIGRATION.md](MIGRATION.md) for the command-by-command replacement.
 
 ## Build
 
@@ -14,6 +22,10 @@ make cross          # builds for darwin/linux/windows
 Requires Go 1.22+.
 
 ## Auth model
+
+This is the legacy CLI authentication model. The replacement RiskOS MCP
+connection uses Accounts v2 OAuth for humans and service principals, then
+applies the actor's current RiskOS permissions.
 
 Two separate Bearer tokens are needed:
 

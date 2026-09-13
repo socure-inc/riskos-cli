@@ -17,6 +17,11 @@ import (
 
 var rootCmd = buildRootCmd(DefaultDeps())
 
+const (
+	deprecationNotice = "RiskOS CLI is in compatibility maintenance. Use the RiskOS MCP server and RiskOS Agent Kit for new integrations."
+	agentKitURL       = "https://github.com/effectivai/riskos-agent-kit"
+)
+
 // SetVersion overrides the version string (called from main with ldflags value).
 func SetVersion(v string) {
 	rootCmd.Version = v
@@ -28,8 +33,12 @@ func SetVersion(v string) {
 func buildRootCmd(d *Deps) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "riskos",
-		Short: "RiskOS CLI — execution layer for RiskOS integrations",
-		Long: `RiskOS CLI — execution layer for RiskOS integrations.
+		Short: "Legacy compatibility CLI for RiskOS integrations",
+		Long: `RiskOS CLI is a compatibility tool for existing RiskOS integrations.
+
+New integrations should use the OAuth-enabled RiskOS MCP server and the
+RiskOS Agent Kit. This CLI remains available during migration and receives
+security and critical correctness fixes only.
 
 Examples:
   riskos auth login
@@ -44,6 +53,9 @@ Examples:
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if v, _ := cmd.Root().PersistentFlags().GetBool("debug"); v {
 				debug.Enable()
+			}
+			if !isQuiet(cmd) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\nmigration: %s\n", deprecationNotice, agentKitURL)
 			}
 		},
 	}
