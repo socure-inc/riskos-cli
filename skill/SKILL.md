@@ -215,12 +215,22 @@ Use it to generate or validate integration code. Note: every workflow is unique 
 
 ### 9. Use Test Cases for Integration
 
-Discover available test cases:
+Discover available test cases (EVAL by default; use `--config-type MOCK` for deterministic MOCK cases):
 
 ```bash
 riskos testcase list <usecase>
+riskos testcase list <usecase> --config-type MOCK
 riskos testcase describe <usecase> <testcase_name>
 ```
+
+For a **LIVE** workflow, inspect the deterministic generate field catalog and optionally generate+import MOCK cases:
+
+```bash
+riskos testcase fields <usecase> <workflow_name> <workflow_version>
+riskos testcase generate <usecase> <workflow_name> <workflow_version>
+```
+
+`generate` is synchronous and may take several minutes. If import fails due to duplicates, delete existing MOCK cases for that use case (or pick a fresh use case) and retry. Then re-list with `--config-type MOCK`.
 
 Download test cases for reference:
 
@@ -388,8 +398,10 @@ riskos webhook update --name <n> --url <u> --use-case <uc>
 | `riskos asset openapi <path>` | Download RiskOS API OpenAPI spec |
 | `riskos asset webhook-spec <path>` | Download webhooks OpenAPI spec |
 | `riskos asset testcases <usecase> <path>` | Download test cases (JSON) |
-| `riskos testcase list <usecase>` | List test cases for a use case |
+| `riskos testcase list <usecase> [--config-type EVAL\|MOCK]` | List test cases for a use case |
 | `riskos testcase describe <usecase> <name>` | Show test case request payload |
+| `riskos testcase fields <usecase> <wf> <ver>` | List deterministic MOCK generate fields (LIVE workflow) |
+| `riskos testcase generate <usecase> <wf> <ver>` | Generate+import MOCK test cases (LIVE; may take minutes) |
 | `riskos testcase run <name>` | Execute test case against sandbox (requires eval key) |
 | `riskos webhook events` | List available webhook event names |
 | `riskos webhook list` | List configured webhooks |

@@ -361,7 +361,7 @@ func TestListTestCases_HappyPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	tcs, err := client.ListTestCases(context.Background(), "consumer_onboarding")
+	tcs, err := client.ListTestCases(context.Background(), "consumer_onboarding", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestListTestCases_Empty(t *testing.T) {
 	})
 	defer srv.Close()
 
-	tcs, err := client.ListTestCases(context.Background(), "consumer_onboarding")
+	tcs, err := client.ListTestCases(context.Background(), "consumer_onboarding", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,9 +394,89 @@ func TestListTestCases_NotFoundIsFeatureUnavailable(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := client.ListTestCases(context.Background(), "consumer_onboarding")
+	_, err := client.ListTestCases(context.Background(), "consumer_onboarding", "")
 	if !errors.Is(err, ErrFeatureNotAvailable) {
 		t.Errorf("expected ErrFeatureNotAvailable, got %v", err)
+	}
+}
+
+func TestListTestCases_AppendsConfigType(t *testing.T) {
+	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.RawQuery, "config_type=MOCK") {
+			t.Errorf("expected config_type=MOCK, got %s", r.URL.RawQuery)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"testCases": []any{}})
+	})
+	defer srv.Close()
+
+	if _, err := client.ListTestCases(context.Background(), "consumer_onboarding", "mock"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListTestCaseFields_HappyPath(t *testing.T) {
+	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/mcp/test-cases/deterministic-fields" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if q.Get("use_case") != "uc" || q.Get("workflow_name") != "wf" || q.Get("workflow_version") != "1.0.0" {
+			t.Errorf("unexpected query %s", r.URL.RawQuery)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"fields":           []map[string]any{{"key": "individual.email", "requirement": "OPTIONAL"}},
+			"requiredCount":    0,
+			"recommendedCount": 0,
+			"optionalCount":    1,
+		})
+	})
+	defer srv.Close()
+
+	out, err := client.ListTestCaseFields(context.Background(), "uc", "wf", "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Fields) != 1 || out.Fields[0].Key != "individual.email" {
+		t.Errorf("unexpected: %+v", out)
+	}
+}
+
+func TestListTestCaseFields_NotFound(t *testing.T) {
+	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer srv.Close()
+
+	_, err := client.ListTestCaseFields(context.Background(), "uc", "wf", "1.0.0")
+	if !errors.Is(err, ErrFeatureNotAvailable) {
+		t.Errorf("expected ErrFeatureNotAvailable, got %v", err)
+	}
+}
+
+func TestGenerateTestCases_PostsBody(t *testing.T) {
+	srv, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/mcp/test-cases/deterministic-generate" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["use_case"] != "uc" || body["workflow_name"] != "wf" || body["workflow_version"] != "2.0.0" {
+			t.Errorf("unexpected body %+v", body)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"totalPaths": 2, "verified": 2, "importedCount": 2, "importErrorSamples": []string{},
+		})
+	})
+	defer srv.Close()
+
+	out, err := client.GenerateTestCases(context.Background(), "uc", "wf", "2.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ImportedCount != 2 || out.Verified != 2 {
+		t.Errorf("unexpected: %+v", out)
 	}
 }
 

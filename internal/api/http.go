@@ -34,6 +34,9 @@ const (
 	// evalDefaultRetryAfter is the fallback retry delay in seconds when the
 	// server does not provide a Retry-After value.
 	evalDefaultRetryAfter = 2
+	// generateHTTPTimeout bounds synchronous deterministic generate+import
+	// (path walk can be long; Assist clients use a long timeout too).
+	generateHTTPTimeout = 5 * time.Minute
 )
 
 // RiskOSClient is the production implementation of Client.
@@ -425,13 +428,17 @@ func (c *RiskOSClient) UpdateWebhook(ctx context.Context, p *WebhookParams) (map
 
 // ─── Test Cases ───────────────────────────────────────────────────────────────
 
-// ListTestCases loads active evaluation test cases for the given use case via
-// GET /api/mcp/test-cases/v2. A 404 means the connected server does not yet
-// expose the v2 endpoint (it predates this rollout); that is surfaced as
-// ErrFeatureNotAvailable so callers can show a soft message instead of a hard
-// error.
-func (c *RiskOSClient) ListTestCases(ctx context.Context, useCase string) ([]TestCase, error) {
-	b, status, err := c.do(ctx, http.MethodGet, "/api/mcp/test-cases/v2?use_case="+url.QueryEscape(useCase), nil)
+// ListTestCases loads sandbox test cases for the given use case via
+// GET /api/mcp/test-cases/v2. Empty configType defaults to active EVAL on the
+// server. Pass "MOCK" for deterministic MOCK cases (including inactive).
+// A 404 means the connected server does not yet expose the v2 endpoint; that
+// is surfaced as ErrFeatureNotAvailable so callers can show a soft message.
+func (c *RiskOSClient) ListTestCases(ctx context.Context, useCase, configType string) ([]TestCase, error) {
+	path := "/api/mcp/test-cases/v2?use_case=" + url.QueryEscape(useCase)
+	if ct := strings.TrimSpace(configType); ct != "" {
+		path += "&config_type=" + url.QueryEscape(strings.ToUpper(ct))
+	}
+	b, status, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -450,6 +457,82 @@ func (c *RiskOSClient) ListTestCases(ctx context.Context, useCase string) ([]Tes
 		return nil, fmt.Errorf("unmarshal test cases: %w", err)
 	}
 	return wrapped.TestCases, nil
+}
+
+// ListTestCaseFields loads the deterministic MOCK generate field catalog via
+// GET /api/mcp/test-cases/deterministic-fields. use_case, workflow_name, and
+// workflow_version are required and must target the LIVE workflow.
+func (c *RiskOSClient) ListTestCaseFields(
+	ctx context.Context,
+	useCase, workflowName, workflowVersion string,
+) (*DeterministicGenerateFields, error) {
+	path := fmt.Sprintf(
+		"/api/mcp/test-cases/deterministic-fields?use_case=%s&workflow_name=%s&workflow_version=%s",
+		url.QueryEscape(useCase),
+		url.QueryEscape(workflowName),
+		url.QueryEscape(workflowVersion),
+	)
+	b, status, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, ErrFeatureNotAvailable
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
+	}
+	var out DeterministicGenerateFields
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("unmarshal deterministic fields: %w", err)
+	}
+	if out.Fields == nil {
+		out.Fields = []DeterministicGenerateField{}
+	}
+	return &out, nil
+}
+
+// GenerateTestCases runs synchronous deterministic MOCK generate+import via
+// POST /api/mcp/test-cases/deterministic-generate. Uses a longer HTTP timeout
+// than other MCP calls because path walk + import can take minutes.
+func (c *RiskOSClient) GenerateTestCases(
+	ctx context.Context,
+	useCase, workflowName, workflowVersion string,
+) (*GenerateTestCasesResult, error) {
+	payload, err := json.Marshal(map[string]string{
+		"use_case":         useCase,
+		"workflow_name":    workflowName,
+		"workflow_version": workflowVersion,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal generate payload: %w", err)
+	}
+	httpClient := &http.Client{
+		Timeout:   generateHTTPTimeout,
+		Transport: c.http.Transport,
+	}
+	orig := c.http
+	c.http = httpClient
+	defer func() { c.http = orig }()
+
+	b, status, err := c.do(ctx, http.MethodPost, "/api/mcp/test-cases/deterministic-generate", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, ErrFeatureNotAvailable
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", status, string(b))
+	}
+	var out GenerateTestCasesResult
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("unmarshal generate result: %w", err)
+	}
+	if out.ImportErrorSamples == nil {
+		out.ImportErrorSamples = []string{}
+	}
+	return &out, nil
 }
 
 // ─── Evaluation API ───────────────────────────────────────────────────────────

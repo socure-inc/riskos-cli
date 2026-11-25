@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,18 +33,25 @@ var testPersonaOrder = []string{
 func buildTestcaseCmd() *cobra.Command {
 	testcaseCmd := &cobra.Command{Use: "testcase", Short: "Discover and execute test cases"}
 
+	var listConfigType string
 	testcaseListCmd := &cobra.Command{
 		Use: "list [usecase]", Short: "List available sandbox test cases",
-		Example: "  riskos testcase list consumer_onboarding\n  riskos testcase list consumer_onboarding -o json",
-		Args:    cobra.ExactArgs(1),
+		Example: "  riskos testcase list consumer_onboarding\n" +
+			"  riskos testcase list consumer_onboarding --config-type MOCK\n" +
+			"  riskos testcase list consumer_onboarding -o json",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useCase := args[0]
 			client := newClient(cmd)
 			output := resolveOutput(cmd)
+			configType, err := normalizeTestCaseConfigType(listConfigType)
+			if err != nil {
+				ui.Abort(err.Error(), "Use --config-type EVAL or MOCK", "")
+			}
 
 			spin := ui.NewSpinner("Fetching test cases…")
 			spin.Start()
-			tcs, err := client.ListTestCases(cmd.Context(), useCase)
+			tcs, err := client.ListTestCases(cmd.Context(), useCase, configType)
 			spin.Stop()
 			if errors.Is(err, api.ErrFeatureNotAvailable) {
 				ui.LogInfo("Test-case listing isn't available on the connected server yet. Please try again after the next RiskOS update.")
@@ -54,19 +62,23 @@ func buildTestcaseCmd() *cobra.Command {
 			}
 
 			if output == "json" {
-				ui.PrintJSON(map[string]any{"testCases": nonNilTestCases(tcs), "count": len(tcs)})
+				ui.PrintJSON(map[string]any{
+					"testCases":  nonNilTestCases(tcs),
+					"count":      len(tcs),
+					"configType": defaultConfigTypeLabel(configType),
+				})
 				return nil
 			}
 
 			if len(tcs) == 0 {
 				ui.Intro("riskos testcase list", useCase)
-				ui.LogInfo(fmt.Sprintf("No sandbox test cases configured for %q.", useCase))
+				ui.LogInfo(fmt.Sprintf("No sandbox test cases configured for %q (%s).", useCase, defaultConfigTypeLabel(configType)))
 				ui.Bar()
 				fmt.Println()
 				return nil
 			}
 
-			ui.Intro("riskos testcase list", fmt.Sprintf("%d available", len(tcs)))
+			ui.Intro("riskos testcase list", fmt.Sprintf("%d available (%s)", len(tcs), defaultConfigTypeLabel(configType)))
 			for _, tc := range tcs {
 				ui.StepActive(ui.Key.Render(tc.TestName) + "  " + ui.DecisionBadge(tc.Decision))
 				if tc.Description != "" {
@@ -75,11 +87,13 @@ func buildTestcaseCmd() *cobra.Command {
 			}
 			ui.NextSteps([]string{
 				"riskos testcase describe " + useCase + " " + tcs[0].TestName,
+				"riskos testcase fields " + useCase + " <workflow_name> <workflow_version>",
 			})
 			fmt.Println()
 			return nil
 		},
 	}
+	testcaseListCmd.Flags().StringVar(&listConfigType, "config-type", "", "EVAL (default) or MOCK")
 
 	testcaseDescribeCmd := &cobra.Command{
 		Use: "describe [usecase] [testcase]", Short: "Show details for a test case",
@@ -92,7 +106,7 @@ func buildTestcaseCmd() *cobra.Command {
 
 			spin := ui.NewSpinner("Fetching test cases…")
 			spin.Start()
-			tcs, err := client.ListTestCases(cmd.Context(), useCase)
+			tcs, err := client.ListTestCases(cmd.Context(), useCase, "")
 			spin.Stop()
 			if errors.Is(err, api.ErrFeatureNotAvailable) {
 				ui.LogInfo("Test-case listing isn't available on the connected server yet. Please try again after the next RiskOS update.")
@@ -138,6 +152,115 @@ func buildTestcaseCmd() *cobra.Command {
 			ui.StepValue("Active", fmt.Sprintf("%t", found.IsActive), ui.Muted)
 			ui.Bar()
 			fmt.Println()
+			return nil
+		},
+	}
+
+	testcaseFieldsCmd := &cobra.Command{
+		Use:   "fields [usecase] [workflow_name] [workflow_version]",
+		Short: "List deterministic MOCK generate request fields for a LIVE workflow",
+		Example: "  riskos testcase fields consumer_onboarding consumer_onboarding 12.0.0\n" +
+			"  riskos testcase fields consumer_onboarding consumer_onboarding 12.0.0 -o json",
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			useCase, workflowName, workflowVersion := args[0], args[1], args[2]
+			client := newClient(cmd)
+			output := resolveOutput(cmd)
+
+			spin := ui.NewSpinner("Fetching generate field catalog…")
+			spin.Start()
+			fields, err := client.ListTestCaseFields(cmd.Context(), useCase, workflowName, workflowVersion)
+			spin.Stop()
+			if errors.Is(err, api.ErrFeatureNotAvailable) {
+				ui.LogInfo("Deterministic field catalog isn't available on the connected server yet. Please try again after the next RiskOS update.")
+				return nil
+			}
+			if err != nil {
+				ui.Abort("Failed to fetch field catalog: "+err.Error(),
+					"Confirm LIVE workflow via:  riskos workflow list "+useCase, "")
+			}
+
+			if output == "json" {
+				ui.PrintJSON(fields)
+				return nil
+			}
+
+			ui.Intro("riskos testcase fields", fmt.Sprintf("%s@%s", workflowName, workflowVersion))
+			ui.StepValue("Required", fmt.Sprintf("%d", fields.RequiredCount), ui.Accent)
+			ui.StepValue("Recommended", fmt.Sprintf("%d", fields.RecommendedCount), ui.Muted)
+			ui.StepValue("Optional", fmt.Sprintf("%d", fields.OptionalCount), ui.Muted)
+			shown := 0
+			for _, f := range fields.Fields {
+				if f.Requirement != "REQUIRED" && f.Requirement != "RECOMMENDED" && shown >= 20 {
+					continue
+				}
+				label := f.Key
+				if f.Locked {
+					label += " (locked)"
+				}
+				ui.StepActive(ui.Key.Render(label) + "  " + ui.Muted.Render(f.Requirement))
+				shown++
+			}
+			if len(fields.Fields) > shown {
+				ui.LogInfo(fmt.Sprintf("…and %d more (use -o json for the full catalog)", len(fields.Fields)-shown))
+			}
+			ui.NextSteps([]string{
+				"riskos testcase generate " + useCase + " " + workflowName + " " + workflowVersion,
+				"riskos testcase list " + useCase + " --config-type MOCK",
+			})
+			fmt.Println()
+			return nil
+		},
+	}
+
+	testcaseGenerateCmd := &cobra.Command{
+		Use:   "generate [usecase] [workflow_name] [workflow_version]",
+		Short: "Generate and import deterministic MOCK test cases for a LIVE workflow",
+		Long: "Runs synchronous deterministic generate+import against the LIVE workflow. " +
+			"This can take a while. If identical MOCK rows already exist, import may fail as a duplicate — " +
+			"delete existing MOCK cases for the use case (or use a fresh use case) and retry.",
+		Example: "  riskos testcase generate consumer_onboarding consumer_onboarding 12.0.0\n" +
+			"  riskos testcase generate consumer_onboarding consumer_onboarding 12.0.0 -o json",
+		Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			useCase, workflowName, workflowVersion := args[0], args[1], args[2]
+			client := newClient(cmd)
+			output := resolveOutput(cmd)
+
+			spin := ui.NewSpinner("Generating deterministic MOCK test cases (this may take a while)…")
+			spin.Start()
+			result, err := client.GenerateTestCases(cmd.Context(), useCase, workflowName, workflowVersion)
+			spin.Stop()
+			if errors.Is(err, api.ErrFeatureNotAvailable) {
+				ui.LogInfo("Deterministic generate isn't available on the connected server yet. Please try again after the next RiskOS update.")
+				return nil
+			}
+			if err != nil {
+				ui.Abort("Failed to generate test cases: "+err.Error(),
+					"Confirm LIVE workflow via:  riskos workflow list "+useCase,
+					"If duplicates: delete existing MOCK cases or use a fresh use case")
+			}
+
+			if output == "json" {
+				ui.PrintJSON(result)
+				return nil
+			}
+
+			ui.Intro("riskos testcase generate", fmt.Sprintf("%s@%s", workflowName, workflowVersion))
+			ui.StepValue("Paths found", fmt.Sprintf("%d", result.TotalPathsFound), ui.Muted)
+			ui.StepValue("Verified", fmt.Sprintf("%d", result.Verified), ui.Accent)
+			ui.StepValue("Imported", fmt.Sprintf("%d", result.ImportedCount), ui.Accept)
+			ui.StepValue("Deleted prior", fmt.Sprintf("%d", result.DeletedCount), ui.Muted)
+			ui.StepValue("Infeasible", fmt.Sprintf("%d", result.Infeasible), ui.Muted)
+			ui.StepValue("Solve errors", fmt.Sprintf("%d", result.SolveErrors), ui.Muted)
+			for _, sample := range result.ImportErrorSamples {
+				ui.LogInfo(sample)
+			}
+			ui.NextSteps([]string{
+				"riskos testcase list " + useCase + " --config-type MOCK",
+				"riskos testcase fields " + useCase + " " + workflowName + " " + workflowVersion,
+			})
+			ui.Outro(fmt.Sprintf("Imported %d MOCK case(s)", result.ImportedCount))
 			return nil
 		},
 	}
@@ -223,7 +346,7 @@ func buildTestcaseCmd() *cobra.Command {
 		},
 	}
 
-	testcaseCmd.AddCommand(testcaseListCmd, testcaseDescribeCmd, testcaseRunCmd)
+	testcaseCmd.AddCommand(testcaseListCmd, testcaseDescribeCmd, testcaseFieldsCmd, testcaseGenerateCmd, testcaseRunCmd)
 	return testcaseCmd
 }
 
@@ -234,4 +357,21 @@ func nonNilTestCases(tcs []api.TestCase) []api.TestCase {
 		return []api.TestCase{}
 	}
 	return tcs
+}
+
+func normalizeTestCaseConfigType(raw string) (string, error) {
+	ct := strings.ToUpper(strings.TrimSpace(raw))
+	switch ct {
+	case "", "EVAL", "MOCK":
+		return ct, nil
+	default:
+		return "", fmt.Errorf("invalid --config-type %q (want EVAL or MOCK)", raw)
+	}
+}
+
+func defaultConfigTypeLabel(configType string) string {
+	if strings.TrimSpace(configType) == "" {
+		return "EVAL"
+	}
+	return strings.ToUpper(configType)
 }

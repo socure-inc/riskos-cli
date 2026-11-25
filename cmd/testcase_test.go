@@ -27,7 +27,7 @@ func testcaseMock() *api.MockClient {
 		ListUseCasesFn: func(ctx context.Context) ([]api.UseCase, error) {
 			return []api.UseCase{{Name: "consumer_onboarding", BlueprintName: "bp1"}}, nil
 		},
-		ListTestCasesFn: func(ctx context.Context, useCase string) ([]api.TestCase, error) {
+		ListTestCasesFn: func(ctx context.Context, useCase, configType string) ([]api.TestCase, error) {
 			return []api.TestCase{
 				{TestName: "Valid_Consumer_Accept", UseCase: "consumer_onboarding", Decision: "ACCEPT", Description: "passes KYC"},
 				{TestName: "Watchlist_Hit_Reject", UseCase: "consumer_onboarding", Decision: "REJECT", Description: "OFAC hit"},
@@ -59,7 +59,7 @@ func TestTestcaseList_EmptyRendersJSONArray(t *testing.T) {
 		ListUseCasesFn: func(ctx context.Context) ([]api.UseCase, error) {
 			return []api.UseCase{{Name: "consumer_onboarding", BlueprintName: "bp1"}}, nil
 		},
-		ListTestCasesFn: func(ctx context.Context, useCase string) ([]api.TestCase, error) {
+		ListTestCasesFn: func(ctx context.Context, useCase, configType string) ([]api.TestCase, error) {
 			return nil, nil
 		},
 	}
@@ -77,6 +77,119 @@ func TestTestcaseList_EmptyRendersJSONArray(t *testing.T) {
 	}
 	if c, _ := resp["count"].(float64); c != 0 {
 		t.Errorf("expected count 0, got %v", resp["count"])
+	}
+}
+
+func TestTestcaseList_ConfigTypeMOCK(t *testing.T) {
+	store := makeAuthStore(t)
+	var gotConfigType string
+	mock := &api.MockClient{
+		ListTestCasesFn: func(ctx context.Context, useCase, configType string) ([]api.TestCase, error) {
+			gotConfigType = configType
+			return []api.TestCase{
+				{TestName: "MOCK_Case", UseCase: useCase, Decision: "ACCEPT", ConfigType: "MOCK"},
+			}, nil
+		},
+	}
+
+	out := captureStdout(t, func() {
+		runCmd(t, store, mock, "testcase", "list", "consumer_onboarding", "--config-type", "MOCK", "-o", "json")
+	})
+
+	if gotConfigType != "MOCK" {
+		t.Errorf("expected ListTestCases configType=MOCK, got %q", gotConfigType)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("expected JSON: %s — %v", out, err)
+	}
+	if resp["configType"] != "MOCK" {
+		t.Errorf("expected configType MOCK in output, got %v", resp["configType"])
+	}
+}
+
+func TestTestcaseFields_JSON(t *testing.T) {
+	store := makeAuthStore(t)
+	mock := &api.MockClient{
+		ListTestCaseFieldsFn: func(ctx context.Context, useCase, workflowName, workflowVersion string) (*api.DeterministicGenerateFields, error) {
+			if useCase != "consumer_onboarding" || workflowName != "consumer_onboarding" || workflowVersion != "12.0.0" {
+				t.Errorf("unexpected args: %s %s %s", useCase, workflowName, workflowVersion)
+			}
+			return &api.DeterministicGenerateFields{
+				RequiredCount:    1,
+				RecommendedCount: 1,
+				OptionalCount:    0,
+				Fields: []api.DeterministicGenerateField{
+					{Key: "individual.firstName", Requirement: "REQUIRED", Locked: true},
+					{Key: "individual.email", Requirement: "RECOMMENDED"},
+				},
+			}, nil
+		},
+	}
+
+	out := captureStdout(t, func() {
+		runCmd(t, store, mock, "testcase", "fields", "consumer_onboarding", "consumer_onboarding", "12.0.0", "-o", "json")
+	})
+
+	var resp api.DeterministicGenerateFields
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("expected JSON: %s — %v", out, err)
+	}
+	if resp.RequiredCount != 1 || len(resp.Fields) != 2 {
+		t.Errorf("unexpected fields response: %+v", resp)
+	}
+}
+
+func TestTestcaseGenerate_JSON(t *testing.T) {
+	store := makeAuthStore(t)
+	mock := &api.MockClient{
+		GenerateTestCasesFn: func(ctx context.Context, useCase, workflowName, workflowVersion string) (*api.GenerateTestCasesResult, error) {
+			return &api.GenerateTestCasesResult{
+				TotalPathsFound:    3,
+				Verified:           2,
+				ImportedCount:      2,
+				DeletedCount:       1,
+				ImportErrorSamples: []string{},
+			}, nil
+		},
+	}
+
+	out := captureStdout(t, func() {
+		runCmd(t, store, mock, "testcase", "generate", "consumer_onboarding", "consumer_onboarding", "12.0.0", "-o", "json")
+	})
+
+	var resp api.GenerateTestCasesResult
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("expected JSON: %s — %v", out, err)
+	}
+	if resp.ImportedCount != 2 || resp.Verified != 2 {
+		t.Errorf("unexpected generate response: %+v", resp)
+	}
+}
+
+func TestNormalizeTestCaseConfigType(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in, want string
+		ok       bool
+	}{
+		{"", "", true},
+		{"eval", "EVAL", true},
+		{"MOCK", "MOCK", true},
+		{"mock", "MOCK", true},
+		{"live", "", false},
+	}
+	for _, tc := range cases {
+		got, err := normalizeTestCaseConfigType(tc.in)
+		if tc.ok {
+			if err != nil || got != tc.want {
+				t.Errorf("normalize(%q)=(%q,%v) want (%q,nil)", tc.in, got, err, tc.want)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("normalize(%q) expected error", tc.in)
+		}
 	}
 }
 

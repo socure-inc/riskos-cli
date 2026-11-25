@@ -5,16 +5,18 @@ import "context"
 // MockClient is a test double implementing Client.
 // Each method field can be set to return specific values.
 type MockClient struct {
-	VerifyAPIKeyFn      func(ctx context.Context) (*AuthVerifyResult, error)
-	ListUseCasesFn      func(ctx context.Context) ([]UseCase, error)
-	ListWorkflowsFn     func(ctx context.Context, useCase string) ([]Workflow, error)
-	GetChecklistFn      func(ctx context.Context, useCase, blueprint string) ([]ChecklistTopic, error)
-	ListWebhookEventsFn func(ctx context.Context) ([]WebhookEventGroup, error)
-	ListWebhooksFn      func(ctx context.Context) ([]WebhookConfig, error)
-	CreateWebhookFn     func(ctx context.Context, p *WebhookParams) (map[string]any, error)
-	UpdateWebhookFn     func(ctx context.Context, p *WebhookParams) (map[string]any, error)
-	ListTestCasesFn     func(ctx context.Context, useCase string) ([]TestCase, error)
-	RunEvaluationFn     func(ctx context.Context, evalKey string, req EvalRequest) (*EvalResponse, error)
+	VerifyAPIKeyFn       func(ctx context.Context) (*AuthVerifyResult, error)
+	ListUseCasesFn       func(ctx context.Context) ([]UseCase, error)
+	ListWorkflowsFn      func(ctx context.Context, useCase string) ([]Workflow, error)
+	GetChecklistFn       func(ctx context.Context, useCase, blueprint string) ([]ChecklistTopic, error)
+	ListWebhookEventsFn  func(ctx context.Context) ([]WebhookEventGroup, error)
+	ListWebhooksFn       func(ctx context.Context) ([]WebhookConfig, error)
+	CreateWebhookFn      func(ctx context.Context, p *WebhookParams) (map[string]any, error)
+	UpdateWebhookFn      func(ctx context.Context, p *WebhookParams) (map[string]any, error)
+	ListTestCasesFn      func(ctx context.Context, useCase, configType string) ([]TestCase, error)
+	ListTestCaseFieldsFn func(ctx context.Context, useCase, workflowName, workflowVersion string) (*DeterministicGenerateFields, error)
+	GenerateTestCasesFn  func(ctx context.Context, useCase, workflowName, workflowVersion string) (*GenerateTestCasesResult, error)
+	RunEvaluationFn      func(ctx context.Context, evalKey string, req EvalRequest) (*EvalResponse, error)
 }
 
 func (m *MockClient) VerifyAPIKey(ctx context.Context) (*AuthVerifyResult, error) {
@@ -73,11 +75,31 @@ func (m *MockClient) UpdateWebhook(ctx context.Context, p *WebhookParams) (map[s
 	return nil, nil
 }
 
-func (m *MockClient) ListTestCases(ctx context.Context, useCase string) ([]TestCase, error) {
+func (m *MockClient) ListTestCases(ctx context.Context, useCase, configType string) ([]TestCase, error) {
 	if m.ListTestCasesFn != nil {
-		return m.ListTestCasesFn(ctx, useCase)
+		return m.ListTestCasesFn(ctx, useCase, configType)
 	}
 	return nil, nil
+}
+
+func (m *MockClient) ListTestCaseFields(
+	ctx context.Context,
+	useCase, workflowName, workflowVersion string,
+) (*DeterministicGenerateFields, error) {
+	if m.ListTestCaseFieldsFn != nil {
+		return m.ListTestCaseFieldsFn(ctx, useCase, workflowName, workflowVersion)
+	}
+	return &DeterministicGenerateFields{Fields: []DeterministicGenerateField{}}, nil
+}
+
+func (m *MockClient) GenerateTestCases(
+	ctx context.Context,
+	useCase, workflowName, workflowVersion string,
+) (*GenerateTestCasesResult, error) {
+	if m.GenerateTestCasesFn != nil {
+		return m.GenerateTestCasesFn(ctx, useCase, workflowName, workflowVersion)
+	}
+	return &GenerateTestCasesResult{ImportErrorSamples: []string{}}, nil
 }
 
 func (m *MockClient) RunEvaluation(ctx context.Context, evalKey string, req EvalRequest) (*EvalResponse, error) {

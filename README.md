@@ -81,10 +81,15 @@ riskos webhook simulate --target http://localhost:3000/webhooks/riskos
 ### testcase
 
 ```bash
-riskos testcase list consumer_onboarding                          # list test cases for a use case
+riskos testcase list consumer_onboarding                          # list EVAL test cases (default)
+riskos testcase list consumer_onboarding --config-type MOCK        # list MOCK / deterministic cases
 riskos testcase describe consumer_onboarding Watchlist_Hit_Reject # show request payload
+riskos testcase fields consumer_onboarding consumer_onboarding 12.0.0   # MOCK generate field catalog
+riskos testcase generate consumer_onboarding consumer_onboarding 12.0.0 # generate+import MOCK cases (slow)
 riskos testcase run Valid_Consumer_Accept                         # post to sandbox evaluation API
 ```
+
+`fields` and `generate` target a **LIVE** workflow version. Generate is synchronous and can take several minutes; if identical MOCK rows already exist, delete them (or use a fresh use case) and retry.
 
 ## Environment variables
 

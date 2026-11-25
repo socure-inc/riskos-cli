@@ -119,6 +119,40 @@ type TestCase struct {
 	ConfigType  string `json:"configType"`
 }
 
+// DeterministicGenerateField is one entry in the MOCK generate field catalog.
+type DeterministicGenerateField struct {
+	Key               string `json:"key"`
+	DisplayName       string `json:"displayName"`
+	Type              string `json:"type"`
+	Source            string `json:"source"`
+	Requirement       string `json:"requirement"`
+	SelectedByDefault bool   `json:"selectedByDefault"`
+	Locked            bool   `json:"locked"`
+}
+
+// DeterministicGenerateFields is the catalog returned by ListTestCaseFields.
+type DeterministicGenerateFields struct {
+	Fields           []DeterministicGenerateField `json:"fields"`
+	RequiredCount    int                          `json:"requiredCount"`
+	RecommendedCount int                          `json:"recommendedCount"`
+	OptionalCount    int                          `json:"optionalCount"`
+}
+
+// GenerateTestCasesResult summarizes deterministic MOCK generate+import.
+type GenerateTestCasesResult struct {
+	TotalPaths         int      `json:"totalPaths"`
+	TotalPathsFound    int      `json:"totalPathsFound"`
+	Verified           int      `json:"verified"`
+	Infeasible         int      `json:"infeasible"`
+	VerifyFail         int      `json:"verifyFail"`
+	SolveErrors        int      `json:"solveErrors"`
+	ImportedCount      int      `json:"importedCount"`
+	DuplicateCount     int      `json:"duplicateCount"`
+	DeletedCount       int      `json:"deletedCount"`
+	SkippedImportCount int      `json:"skippedImportCount"`
+	ImportErrorSamples []string `json:"importErrorSamples"`
+}
+
 // EvalRequest is the payload sent to POST /api/evaluation.
 type EvalRequest struct {
 	ID        string          `json:"id"`

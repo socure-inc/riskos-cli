@@ -188,7 +188,7 @@ func buildAssetCmd() *cobra.Command {
 
 			spin := ui.NewSpinner("Fetching test cases…")
 			spin.Start()
-			tcs, err := client.ListTestCases(cmd.Context(), useCase)
+			tcs, err := client.ListTestCases(cmd.Context(), useCase, "")
 			spin.Stop()
 			if errors.Is(err, api.ErrFeatureNotAvailable) {
 				ui.Abort("Test-case download isn't available on the connected server yet.",

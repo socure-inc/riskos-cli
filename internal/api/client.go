@@ -13,6 +13,10 @@ type Client interface {
 	ListWebhooks(ctx context.Context) ([]WebhookConfig, error)
 	CreateWebhook(ctx context.Context, p *WebhookParams) (map[string]any, error)
 	UpdateWebhook(ctx context.Context, p *WebhookParams) (map[string]any, error)
-	ListTestCases(ctx context.Context, useCase string) ([]TestCase, error)
+	// ListTestCases lists sandbox test cases. configType is optional: empty/EVAL
+	// returns active EVAL cases; MOCK returns MOCK/deterministic cases including inactive.
+	ListTestCases(ctx context.Context, useCase, configType string) ([]TestCase, error)
+	ListTestCaseFields(ctx context.Context, useCase, workflowName, workflowVersion string) (*DeterministicGenerateFields, error)
+	GenerateTestCases(ctx context.Context, useCase, workflowName, workflowVersion string) (*GenerateTestCasesResult, error)
 	RunEvaluation(ctx context.Context, evalKey string, req EvalRequest) (*EvalResponse, error)
 }
